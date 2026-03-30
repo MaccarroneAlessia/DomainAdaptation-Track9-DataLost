@@ -3,7 +3,7 @@
 > This file must contain **exclusively the technical aspects** of the project (Setup, Run, baseline Results). The textual and theoretical report should be placed in the **[`docs/REPORT.md`](docs/REPORT.md)** file.
 > *Delete this note block before submission.*
 
-# [Assigned Project Title]
+# Multi-source Domain Adaptation for Action Recognition
 
 [![Report](https://img.shields.io/badge/Paper-REPORT.md-blue)](docs/REPORT.md)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
@@ -23,7 +23,6 @@ A brief paragraph (3-4 lines) that visually and concisely describes the project,
 ### 1. Data and Environment Setup
 
 **Prerequisites:**
-Explain how the reader can install the environment to run your code.
 
 ```bash
 git clone https://github.com/yourusername/your-repo.git
