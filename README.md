@@ -9,8 +9,8 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
 ## 👥 Group and Project Information
-- **Group ID**: [E.g., G07]
-- **Project ID**: [E.g., 1]
+- **Group ID**: DataLost
+- **Project ID**: Track 9
 
 ## 📝 Project Description
 A brief paragraph (3-4 lines) that visually and concisely describes the project, the main implemented model, and the task addressed. 
