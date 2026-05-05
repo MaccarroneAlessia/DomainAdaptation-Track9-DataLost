@@ -33,7 +33,7 @@ This file contains the list of available projects, complete details for each pro
 | 5 | [Cross-Modal Knowledge Distillation (Audio to Vision)](#project-5) | Knowledge Distillation | Large | EPIC-Kitchens | Overfittony |
 | 6 | [Knowledge Distillation for Mobile Action Recognition](#project-6) | Knowledge Distillation | Small | HMDB-51 | G24 |
 | 7 | [Domain Adaptation for Action Recognition – Exocentric → Egocentric](#project-7) | Domain Adaptation | Medium | Assembly101 | CassiaBranca |
-| 8 | [Domain Adaptation with Image-to-Image Translation (CycleGAN)](#project-8) | Domain Adaptation | Medium | Office-31 | Free |
+| 8 | [Domain Adaptation with Image-to-Image Translation (CycleGAN)](#project-8) | Domain Adaptation | Medium | Office-31 | EventHorizonTeam |
 | 9 | [Multi-source Domain Adaptation for Action Recognition](#project-9) | Domain Adaptation | Large | HMDB-51/UCF-101/Kinetics | DataLost |
 | 10 | [Contrastive Learning for Video Representation (SimCLR)](#project-10) | Self-Supervised Learning | Small | UCF-101 | G16 |
 | 11 | [Masked Autoencoders for Image Representation Learning](#project-11) | Self-Supervised Learning | Small | ImageNet 1K | G21 |
@@ -44,12 +44,18 @@ This file contains the list of available projects, complete details for each pro
 | 16 | [Multimodal Action Recognition – Video + Audio](#project-16) | Video Understanding | Large | EPIC-KITCHENS | DeepTeam |
 | 17 | [Egocentric Video + Gaze for Action Recognition](#project-17) | Video Understanding | Large | EGTEA Gaze+ | The Outliers 2.0 |
 | 18 | [State-Space Models (Mamba) for Mistake Detection](#project-18) | Advanced Sequential Modeling | Large | Assembly101 | LeMeCla |
-| 19 | [Transformer vs RNN for Procedural Video Understanding](#project-19) | Advanced Sequential Modeling | Medium | EGO4D Goal-Step | Free |
-| 20 | [Image & Language Representation Learning](#project-20) | Vision & Language | Medium | MS-COCO | Free |
-| 21 | [Deep Reinforcement Learning for Frame Selection in Video](#project-21) | Reinforcement Learning | Large | UCF101 | Free |
+| 19 | [Transformer vs RNN for Procedural Video Understanding](#project-19) | Advanced Sequential Modeling | Medium | EGO4D Goal-Step | BAT 🦇 (Backpropagation Attention Team) |
+| 20 | [Image & Language Representation Learning](#project-20) | Vision & Language | Medium | MS-COCO | G37 |
+| 21 | [Deep Reinforcement Learning for Frame Selection in Video](#project-21) | Reinforcement Learning | Large | UCF101 | G38 |
 | 22 | [Learn to Play Super Mario Bros with Deep Reinforcement Learning](#project-22) | Reinforcement Learning | Medium | Super Mario Bros Environment | G20 |
 | 23 | [Align a Small LLM with GRPO for Strict Code or JSON Generation](#project-23) | Reinforcement Learning | Medium | Synthetic Logic Array | G23 |
 | 24 | [Cross-Modal Knowledge Distillation (Audio to Vision)](#project-24) | Knowledge Distillation | Large | VGGSound | Zero e Uno |
+| 25 | [Learn to Drive a car with Reinforcement Learning](#project-25) | Reinforcement Learning | Large | Assetto Corsa Gym | FiCo |
+| 26 | [Graph-based Metric Learning for Scene Understanding with Semantic Web Technologies](#project-26) | Metric Learning | Large | GQA | Fly Now|
+| 27 | [Multimodal Generative VQA on Synthetic 3D Scenes](#project-27) | Vision & Language | - | Synthetic Data | G17 |
+| 28 | [Egocentric Object-State Change Detection](#project-28) | Video Understanding | Medium | Ego4D | Marte |
+| 29 | [Feature‑based Knowledge Distillation for Monocular Depth Estimation](#project-29) | Knowledge Distillation | Small | KITTI, NYU Depth V2 | G22 |
+| 30 | [Unsupervised Domain Adaptation for Image Recognition under Domain Shift](#project-30) | Domain Adaptation | Small | Intel Scene Classification, Places | G31 |
 
 ## Detailed Project Descriptions
 
@@ -637,6 +643,233 @@ In many real-world edge settings, deploying multi-modal sensors is expensive or 
 - Implement a temporal 3D CNN or a Video Transformer as the visual teacher to account for longitudinal temporal dynamics.
 - Explore and benchmark lightweight alternatives to AST.
 
+<a id='project-25'></a>
+### Learn to Drive a car with Reinforcement Learning
+**Suggested Size**: Large  
+**Reference Module**: Reinforcement Learning  
+
+#### Problem Description
+Using Assetto Corsa, a popular symracing game train a Neural Network to follow the AI_line: the line that the CPU use to know the path to follow when playing against a player offline.
+
+#### Dataset
+We found this project on GitHub that implements the interface to let the code interact with the game.
+
+- **Assetto Corsa Gym** (Gym Implementation: https://github.com/dasGringuen/assetto_corsa_gym).
+
+While Assetto Corsa gives API to access game information, it's not as easy to control the game. So the workaround consists in using vJoy, a virtual controller that can be controlled trough python. 
+
+#### Objective
+
+Compare the trained model with the PID approach developed in https://github.com/Igni-ss/CarController
+
+<a id='project-26'></a>
+### Track 26: Graph-based Metric Learning for Scene Understanding with Semantic Web Technologies
+**Suggested Size**: Large  
+**Reference Module**: Metric Learning  
+
+#### Problem Description
+Images exist as a rich tapestry of interrelated objects, yet standard CNN architectures often reduce this to a single flat vector. This project aims to represent complex scenes structurally as graphs, where nodes are objects and edges describe their spatial or semantic relationships. By learning dynamic embeddings of these graphs, you will create a system capable of robust scene-to-scene retrieval based on compositional similarity rather than just pixel-level textures. 
+
+To achieve this, the project will specifically integrate Semantic Web technologies, such as **OWL** and the **Virtuoso Triple Store**, to manage and enrich the representation of the Scene Graphs before they are provided to the neural network. Furthermore, the final goal is to host the entire retrieval system and infrastructure on a Cloud architecture.
+
+#### Dataset
+- **GQA** ([https://cs.stanford.edu/people/dorarad/gqa/download.html](https://cs.stanford.edu/people/dorarad/gqa/download.html)) or a subset.
+- 100K images, utilizing provided scene graphs and localized scene labels.
+
+#### Minimum Objectives
+1. **Baseline**: A standard CNN processing the raw image to predict the scene label/embedding, ignoring the explicit graph structure.
+2. **Semantic Knowledge Integration**: Utilize OWL and Virtuoso Triple Store to store, manage, and semantically enrich the scene graphs extracted from the dataset.
+3. **Graph Encoder**: Implement a Graph Convolutional Network (GCN) that ingests the enriched ground truth scene graphs (nodes and edges) resulting in a unified scene embedding.
+4. **Contrastive Training**: Train the embeddings using contrastive (or triplet) loss so that paired graphs from similar scenarios (e.g., identical activity and place) cluster tightly.
+5. **Retrieval Evaluation**: Given a query scene graph, perform retrieval on the dataset to fetch structurally similar graphs, evaluating via standard classification metrics (Accuracy, Precision, Recall).
+
+#### Extra Objectives
+- **Cloud Infrastructure**: Deploy and host the entire system (including the Triple Store and the neural network inference model) on a Cloud architecture.
+- Test robustness to structural perturbations (e.g., artificially drop nodes/edges from test graphs to see if retrieval degrades).
+- Build a dynamic graph extractor: utilize Vision-Language Models (VLMs) or Object Trackers to automatically extract scene graphs from raw videos instead of relying on ground truth.
+- Visualize and interpret which edges/relations act as critical focal points for the model's similarity metric.
+
+<a id='project-27'></a>
+### Track 27: Multimodal Generative VQA on Synthetic 3D Scenes  
+**Reference Module**: Multimodal Deep Learning  
+
+#### Problem Description
+The project aims to build a multimodal generative model capable of answering questions about synthetic 3D scenes rendered in Blender. The system must perform spatial reasoning on single frames and temporal reasoning on pairs of consecutive frames where objects slightly move or new objects appear. All images, questions, and answers are procedurally generated through Blender Python scripting, ensuring full control over object placement, lighting, and camera viewpoints.
+
+#### Dataset
+- **Synthetic 3D Scenes**
+  - Randomized objects (cubes, spheres, cups, books, chairs, etc.)
+  - Variable lighting and camera perspectives  
+  - Paired frames with small object displacements  
+
+- **Automatically Generated QA Pairs**
+  - Single-frame examples:  
+    - “Which object is above the red cube?” → “The blue sphere”  
+    - “Which object is near the green cup?” → “The yellow cube”
+  - Two-frame examples:  
+    - “Which object moved closer to the green cube?” → “The red cup”  
+    - “Which object was added?” → “The blue book”
+
+- **Scale**
+  - ~5k unique scenes, ~10k images including variations  
+  - ≥3 questions per image  
+  - >30k QA pairs  
+
+#### Minimum Objectives
+1. **Image Encoder**  
+   Pretrained CNN or ViT for single frames or frame pairs (or difference embeddings).  
+2. **Text Encoder**  
+   Pretrained Transformer (BERT, DistilBERT).  
+3. **Fusion Module**  
+   Combines visual and textual embeddings; supports temporal inputs.  
+4. **Generative Decoder**  
+   Transformer decoder trained to produce textual answers using token-level cross-entropy.
+
+#### Extra Objectives
+- Fine-tuning on small real-image datasets  
+- Light encoder fine-tuning for improved object perception  
+- Depth map integration for enhanced spatial reasoning  
+- Semantic segmentation supervision to guide attention  
+
+
+<a id='project-28'></a>
+## Track 28: Egocentric Object-State Change Detection  
+**Suggested Size**: Small / Medium  
+**Reference Module**: Action Recognition / Video Analysis  
+
+### Problem Description
+Egocentric video understanding goes beyond classifying actions: it requires identifying *when* an object undergoes a physical transformation. This project focuses on the **temporal localization of the “Point of No Return” (PNR)** — the exact frame where an irreversible object-state change occurs (e.g., opening a jar, cutting a vegetable, switching on a device).
+
+The goal is to move past action labels and instead detect the **moment of transformation**, leveraging hand–object interactions, temporal cues, and fine-grained visual changes typical of first-person video.
+
+### Dataset
+- **Ego4D – Hands and Objects section** (contains explicit PNR annotations and rich egocentric interactions).  
+
+### Minimum Objectives
+1. **Baseline PNR Localization**  
+   Implement a simple model (e.g., frame regression or temporal boundary detection) to estimate the PNR frame, establishing a lower-bound baseline.
+
+2. **Egocentric Feature Extraction**  
+   Use 2D/3D backbones (SlowFast, X3D, TimeSformer, etc.) to extract temporal and hand–object features. Evaluate which cues best predict the PNR.
+
+3. **PNR Temporal Localization Model**  
+   Train a model to regress the PNR frame or classify the temporal segment containing the state change.  
+   Possible approaches:  
+   - Frame index regression  
+   - Temporal action localization  
+   - Change-point detection  
+
+4. **Evaluation**  
+   Measure temporal distance between predicted and ground-truth PNR (e.g., Mean Temporal Error, Frame Distance).  
+   Compare:  
+   - Baseline model  
+   - Advanced temporal model  
+   - Model with explicit hand–object cues  
+
+
+### Extra Objectives
+- **Hand–Object Interaction Modeling**  
+  Integrate hand pose estimation or hand–object bounding boxes to improve PNR precision.
+
+- **Multi-modal Fusion**  
+  Combine RGB, optical flow, depth (if available), or audio to capture richer signals of state change.
+
+- **Temporal Attention / Transformers**  
+  Use temporal attention mechanisms to automatically highlight frames most relevant to the PNR.
+
+- **Ablation Studies**  
+  Analyze the effect of:  
+  - temporal window size  
+  - presence/absence of hands  
+  - annotation noise  
+
+- **Interpretable Visualizations**  
+  Produce:  
+  - temporal heatmaps  
+  - saliency maps  
+  - frame-by-frame error curves  
+  to illustrate how the model identifies the PNR.
+
+
+<a id='project-29'></a>
+### Project 29: Feature‑based Knowledge Distillation for Monocular Depth Estimation
+**Suggested Size**: Small
+**Reference Module**: Knowledge Distillation  
+
+#### Problem Description
+State‑of‑the‑art Monocular Depth Estimation models deliver impressive accuracy but remain too computationally heavy for real‑time deployment on edge devices such as Raspberry Pi, Jetson Nano, or microcontroller‑class hardware. Knowledge Distillation (KD) offers a principled way to compress these models by training a lightweight *student* network to imitate a large, high‑performance *teacher*.
+
+In this project, you will build a compact depth‑estimation model that learns from both:
+- **ground‑truth depth maps**, and  
+- **distilled knowledge from a powerful teacher network**.
+
+Beyond classical output‑based distillation, you will explore **feature‑based distillation**, where intermediate spatial representations from the teacher guide the student toward learning richer geometric and structural cues—crucial for depth prediction.
+
+#### Datasets
+- **NYU Depth V2**  
+- **KITTI**
+
+#### Minimum Objectives
+1. **Teacher and Student**  
+   Use a strong depth‑estimation teacher (e.g., **MiDaS**, optionally fine‑tuned on NYU Depth V2) and define a lightweight student model (e.g., **MobileNetV2‑based CNN** or similar compact encoder–decoder).
+
+2. **Baseline**  
+   Train the student *from scratch* using only ground‑truth depth supervision (L1 or L2 loss), without any distillation.
+
+3. **Distillation Algorithms**  
+   Implement:
+   - **Output‑based distillation**: force the student to match the teacher’s predicted depth maps.  
+   - **Feature‑based distillation** (e.g., **FitNets**): align intermediate feature maps between teacher and student.
+
+4. **Evaluation**  
+   Compare Teacher, Baseline Student, and KD‑trained Student using:
+   - **Accuracy metrics**: MSE, MAE, δ‑accuracy thresholds  
+   - **Efficiency metrics**: model size (MB), number of parameters, inference latency (ms)
+
+#### Extra Objectives
+- Combine output‑based and feature‑based (fitNets) KD using **weighted multi‑term loss functions**; study the effect of different weighting strategies.
+- Implement **Attention Transfer** to encourage the student to mimic spatial attention patterns.
+- Evaluate **edge‑device deployment** by exporting the student to ONNX/TensorRT and measuring real latency on a Raspberry Pi or Jetson device.
+
+
+<a id='project-30'></a>
+### Project 30: Unsupervised Domain Adaptation for Image Recognition under Domain Shift
+**Suggested Size**: Small  
+**Reference Module**: Domain Adaptation  
+
+#### Problem Description
+Image recognition models trained on a specific dataset often suffer a significant drop in performance when evaluated on images coming from a different distribution, a phenomenon known as **domain shift**. This project focuses on understanding, quantifying, and mitigating this effect.
+
+You will train a convolutional classifier on a **source domain** composed of natural and urban scenes. The trained model will then be evaluated on a **target domain** consisting of images you personally collected. These images differ in style, lighting, resolution, and acquisition conditions, making them ideal for studying real‑world domain shift.
+
+After measuring the degradation in accuracy, you will apply **unsupervised domain adaptation (UDA)** techniques—without using labels from the target domain—to improve the model’s generalization ability.
+
+#### Datasets
+- **Source domain**: Intel Image Classification Dataset, a subset of Places (http://places2.csail.mit.edu, https://github.com/CSAILVision/miniplaces) or similar
+- **Target domain**: Custom dataset (your own photos)
+
+#### Minimum Objectives
+1. **Training and Evaluation on Source Domain**  
+   Train a CNN classifier (e.g., ResNet‑18, MobileNetV2) on the labeled source dataset and evaluate its performance.
+
+2. **Evaluation on Target Domain**  
+   Test the same model on the unlabeled target dataset to quantify the domain shift and highlight performance degradation. 
+
+3. **Unsupervised Domain Adaptation**  
+   Implement at least two UDA strategies, such as:  
+   - **Feature Alignment** (e.g., domain‑adversarial training)  
+   - **Pixel-Based Adaptation** (e.g., CycleGAN)
+
+4. **Performance Comparison**  
+   Compare the model’s performance **before and after adaptation** on the target domain, reporting accuracy and qualitative failure cases.
+
+#### Extra Objectives
+- Implement **Maximum Mean Discrepancy (MMD)** or **CORAL** to explicitly reduce feature‑distribution mismatch.  
+- Visualize source–target feature embeddings using **t‑SNE** or **UMAP** to illustrate alignment improvements.  
+- Explore **self‑training** with pseudo‑labels generated on the target domain.  
+- Evaluate robustness under controlled perturbations (e.g., blur, noise, color shifts) to analyze which factors contribute most to domain shift.
+
+  
 ---
 
 ## Groups
@@ -675,3 +908,9 @@ In many real-world edge settings, deploying multi-modal sensors is expensive or 
 | G30 | 1 |
 | G31 | 1 |
 | G32 | 1 |
+| G33 | 1 |
+| G34 | 1 |
+| G35 | 1 |
+| G36 | 1 |
+| G37 | 1 |
+| G38 | 1 |
