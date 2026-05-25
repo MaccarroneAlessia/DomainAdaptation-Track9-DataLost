@@ -25,8 +25,8 @@ A brief paragraph (3-4 lines) that visually and concisely describes the project,
 **Prerequisites:**
 
 ```bash
-git clone https://github.com/yourusername/your-repo.git
-cd your-repo
+git clone https://github.com/MaccarroneAlessia/DomainAdaptation-Track9-DataLost.git
+cd DomainAdaptation-Track9-DataLost
 conda env create -f environment.yml
 conda activate dl-project
 ```

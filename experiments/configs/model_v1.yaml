@@ -1,0 +1,25 @@
+# =============================================================================
+# model_v1.yaml — override su base_config per il primo esperimento completo
+# Eredita da base_config.yaml, sovrascrive solo i valori che cambiano.
+# =============================================================================
+
+# --- Identificazione run -----------------------------------------------------
+logging:
+  run_name:   "model_v1_lradv01_e30"
+  notes:      "Prima run con dati reali. GRL alpha schedulato 0→1."
+
+# --- Iperparametri specifici di questa versione ------------------------------
+training:
+  max_epochs:    30
+  learning_rate: 1.0e-4
+  lambda_adv:    0.1
+
+# --- Hardware: modifica qui se giri su L40S invece di K80 -------------------
+hardware:
+  precision:  "fp32"          # cambia in "bfloat16" se sei su gnode10
+
+# --- Ablation flags (per report) ---------------------------------------------
+ablation:
+  use_grl:            true
+  grl_alpha_schedule: true    # false → alpha fisso a 1.0
+  source2_enabled:    true    # false → simula mancanza di una sorgente

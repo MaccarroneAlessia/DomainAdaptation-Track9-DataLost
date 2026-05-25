@@ -1,0 +1,47 @@
+# base_config.yaml — configurazione condivisa da tutti gli esperimenti
+
+# --- Percorsi (adattati al cluster DMI) --------------------------------------
+paths:
+  data_root:   "../../data"          # relativo a src/  oppure /shared/data/pytorch
+  output_dir:  "experiments/logs"
+  checkpoint:  "experiments/checkpoints"
+
+#data_root: /shared/data/pytorch
+#output_dir: ./experiments/logs/
+
+# --- Dataset -----------------------------------------------------------------
+data:
+  batch_size:  8
+  num_workers: 4                     # su K80 tieni basso; su L40S puoi alzare
+  pin_memory:  true
+
+# --- Architettura ------------------------------------------------------------
+model:
+  encoder:       "r2plus1d_18"       # <-- Modificato allo stato dell'arte
+  pretrained:    false # senza internet
+  feature_dim:   512
+  num_classes:
+    source1:     51                  # HMDB-51
+    source2:      5                  # UCF subset
+    target:      400                 # Kinetics-400
+  dropout:       0.5
+
+# --- Training ----------------------------------------------------------------
+training:
+  max_epochs:    30
+  learning_rate: 1.0e-4
+  weight_decay:  1.0e-4
+  #lambda_adv:    0.1                 # peso della loss avversariale
+  lambda_adv: 0.0  # 0.0 per spegnere la Domain Adaptation e avere il puro Zero-Shot Baseline
+  # il modello addestrerà solo le teste di classificazione condivise e farà test zero-shot su Kinetics
+
+# --- Cluster / Hardware ------------------------------------------------------
+hardware:
+  precision:     "fp32"              # fp32 su K80; bfloat16 su L40S (gnode10)
+  seed:          42
+
+# --- Logging -----------------------------------------------------------------
+logging:
+  wandb_mode:    "offline"           # nodi senza internet
+  project:       "multi-source-da"
+  run_name:      "baseline"
