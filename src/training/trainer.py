@@ -56,65 +56,7 @@ class Trainer:
         # Miglior accuratezza sul target per salvare il checkpoint ottimale
         self.best_tgt_acc = -1.0
 
-    # scheduling progressivo di GRL
-    import os
-import random
-import torch
-import torch.nn as nn
-import torch.nn.functional as F
-from tqdm import tqdm
-
-try:
-    import wandb
-except ModuleNotFoundError:
-    wandb = None
-
-class Trainer:
-    """
-    Trainer per il framework Multi-Source Domain Adaptation (Track 9).
-    
-    Gestisce:
-    - Ottimizzazione simultanea (Classification Loss + Adversarial Domain Loss)
-    - Scheduling progressivo del parametro alpha del GRL
-    - Incomplete batch simulation (drop casuale mid-epoch delle sorgenti per robustezza)
-    - Tracciamento e logging dell'influence ratio (Source 1 vs Source 2)
-    - Misurazione della Domain Confusion (probabilità e entropia sul Target)
-    - Valutazione su Target sia tramite testa specifica (head_tgt) che tramite ensemble pesato
-
-    Metodi pubblici:
-        fit()           — loop completo (chiama train_epoch + evaluate ogni epoca)
-        train_epoch()   — singola epoca di training
-        train_step()    — singolo batch (forward + loss + backward)
-        evaluate()      — valutazione sul target (zero-shot)
-        _log()          — logging W&B centralizzato
-        _save_checkpoint() — salvataggio best model
-    """
-    def __init__(
-        self,
-        model: nn.Module,
-        loss_fn: nn.Module,
-        optimizer: torch.optim.Optimizer,
-        device: torch.device,
-        max_epochs: int = 30,
-        checkpoint_dir: str = "experiments/checkpoints",
-        incomplete_simulation: bool = True,
-        source2_enabled: bool = True,
-    ):
-        self.model = model
-        self.loss_fn = loss_fn
-        self.optimizer = optimizer
-        self.device = device
-        self.max_epochs = max_epochs
-        self.checkpoint_dir = checkpoint_dir
-        self.incomplete_simulation = incomplete_simulation
-        self.source2_enabled = source2_enabled
         
-        # Creazione della cartella per i checkpoint
-        os.makedirs(checkpoint_dir, exist_ok=True)
-        self._global_step = 0  # contatore globale per W&B
-        # Miglior accuratezza sul target per salvare il checkpoint ottimale
-        self.best_tgt_acc = -1.0
-
     # scheduling
     def _compute_alpha(self, epoch: int, step: int, num_steps: int) -> float:
         """
