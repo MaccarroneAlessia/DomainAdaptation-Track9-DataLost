@@ -140,13 +140,13 @@ class MultiSourceDANN(nn.Module):
         """Aggiornamento EMA del centroide della sorgente indicata (solo in training)."""
         batch_mean = feat.detach().mean(dim=0)
         if domain == 0:
-            if not self.s1_centroid_initialized:
+            if not self.s1_centroid_initialized.item():
                 self.s1_centroid.copy_(batch_mean)
                 self.s1_centroid_initialized.fill_(True)
             else:
                 self.s1_centroid.copy_(momentum * self.s1_centroid + (1 - momentum) * batch_mean)
         elif domain == 1:
-            if not self.s2_centroid_initialized:
+            if not self.s2_centroid_initialized.item():
                 self.s2_centroid.copy_(batch_mean)
                 self.s2_centroid_initialized.fill_(True)
             else:
@@ -165,7 +165,7 @@ class MultiSourceDANN(nn.Module):
 
         Restituisce un tensore (B, num_classes_tgt) con probabilità che sommano a 1.
         """
-        both_ready = self.s1_centroid_initialized and self.s2_centroid_initialized
+        both_ready = self.s1_centroid_initialized.item() and self.s2_centroid_initialized.item()
         if both_ready:
             mu = feat.mean(dim=0, keepdim=True)          # (1, 512)
             s1 = F.cosine_similarity(mu, self.s1_centroid.unsqueeze(0), eps=1e-8)
