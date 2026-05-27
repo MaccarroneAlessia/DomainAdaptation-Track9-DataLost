@@ -3,6 +3,7 @@
 
 import torch
 import torch.nn as nn
+import urllib.request
 from torchvision.models.video import r3d_18, R3D_18_Weights, r2plus1d_18, R2Plus1D_18_Weights
 
 class VideoEncoder(nn.Module):
@@ -26,6 +27,10 @@ class VideoEncoder(nn.Module):
     """
     def __init__(self, pretrained: bool = True, model_type: str = "r3d_18"):
         super(VideoEncoder, self).__init__()
+        # appunto: su nodi senza internet evito il download dei pesi (timeout breve)
+        if pretrained and not self._has_internet(timeout_s=3.0):
+            print("Warning: rete non disponibile, uso pretrained=False per evitare blocchi.")
+            pretrained = False
         # caricamendo dei pesi preaddestrati di R3D-18 
         # (nota : sul cluster i pesi sono già pre-scaricati nel container SIF per evitare problemi di rete)
         #weights = R3D_18_Weights.DEFAULT if pretrained else None
@@ -33,11 +38,19 @@ class VideoEncoder(nn.Module):
 
         # Scelta dell'architettura: R3D-18 (standard) oppure R(2+1)D-18 (stato dell'arte)
         if model_type == "r2plus1d_18":
-            weights = R2Plus1D_18_Weights.DEFAULT if pretrained else None
-            self.backbone = r2plus1d_18(weights=weights)
+            try:
+                weights = R2Plus1D_18_Weights.DEFAULT if pretrained else None
+                self.backbone = r2plus1d_18(weights=weights)
+            except Exception as e:
+                print(f"Warning: caricamento pesi r2plus1d fallito ({e}). Fallback a pretrained=False")
+                self.backbone = r2plus1d_18(weights=None)
         else:
-            weights = R3D_18_Weights.DEFAULT if pretrained else None
-            self.backbone = r3d_18(weights=weights)
+            try:
+                weights = R3D_18_Weights.DEFAULT if pretrained else None
+                self.backbone = r3d_18(weights=weights)
+            except Exception as e:
+                print(f"Warning: caricamento pesi r3d fallito ({e}). Fallback a pretrained=False")
+                self.backbone = r3d_18(weights=None)
         
         # out_dim come attributo pubblico per parte 3 e
         # per collegare correttamente l'encoder alle teste di classificazione in model.py
@@ -47,14 +60,22 @@ class VideoEncoder(nn.Module):
         # la rete non fa classificazione, ma si ferma all'estrazione 
         # del vettore di feature spazio-temporali da 512-dim -> EMBEDDING
         self.backbone.fc = nn.Identity()
+
+    @staticmethod
+    def _has_internet(timeout_s: float = 3.0) -> bool:
+        try:
+            urllib.request.urlopen("https://download.pytorch.org", timeout=timeout_s)
+            return True
+        except Exception:
+            return False
         
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         # Input shape standard: (B, C, T, H, W) -> (Batch, 3, 16, 112, 112)
         # Se l'input proviene da datasets.py ed è (B, T, C, H, W) con T=16 e C=3:
         # x.shape[2] == 3 indica che il canale (3) è nella terza posizione (indice 2)
-        if len(x.shape) == 5 and x.shape[2] == 3 and x.shape[1] != 3:
+        if len(x.shape) == 5 and x.shape[2] == 3 and x.shape[1] == 16:
             # R3D-18 vuole (B, C, T, H, W), quindi permutiamo da (B, T, C, H, W)
-            x = x.permute(0, 2, 1, 3, 4)
+            x = x.permute(0, 2, 1, 3, 4).contiguous()
         
         # Passiamo il tensore al modello
         features = self.backbone(x)
@@ -65,7 +86,7 @@ if __name__ == "__main__":
     print("--- Test R3D-18 ---")
     model_r3d = VideoEncoder(pretrained=False, model_type="r3d_18")
     # 1. Test shape da datasets.py: (B, T, C, H, W)
-    dummy_input = torch.randn(2, 3, 16, 112, 112)
+    dummy_input = torch.randn(2, 16, 3, 112, 112)
     print(f"Test 1. Loader shape (2, 16, 3, 112, 112) -> Output R3D-18 shape: {model_r3d(dummy_input).shape}")
 
     # 2. Test shape standard / test fittizi: (B, C, T, H, W)

@@ -105,22 +105,26 @@ def main():
     print(f"Classi — S1: {len(hmdb_map)} | S2: {len(ucf_map)} | Tgt: {len(kin_map)}")
 
     # --- Modello -------------------------------------------------------------
+    model_cfg = cfg.get("model", {})
+    train_cfg = cfg.get("training", {})
     model = MultiSourceDANN(
         num_classes_s1  = len(hmdb_map),
         num_classes_s2  = len(ucf_map),
         num_classes_tgt = len(kin_map),
-        pretrained      = cfg["model"].get("pretrained", False),
-        backbone_type   = cfg["model"].get("encoder", "r2plus1d_18")
+        pretrained      = model_cfg.get("pretrained", False),
+        backbone_type   = model_cfg.get("encoder", "r2plus1d_18"),
+        temperature     = model_cfg.get("temperature", 0.1),
+        ema_momentum    = model_cfg.get("ema_momentum", 0.9),
     )
     model = model.to(device)
     print(f"Modello su {device} — parametri: {sum(p.numel() for p in model.parameters()):,}")
 
     # --- Loss e Ottimizzatore ------------------------------------------------
-    loss_fn   = MultiSourceLoss(lambda_adv=cfg["training"]["lambda_adv"])
+    loss_fn   = MultiSourceLoss(lambda_adv=train_cfg.get("lambda_adv", 0.1))
     optimizer = optim.Adam(
         model.parameters(),
-        lr           = cfg["training"]["learning_rate"],
-        weight_decay = cfg["training"]["weight_decay"],
+        lr           = train_cfg.get("learning_rate", 1e-4),
+        weight_decay = train_cfg.get("weight_decay", 1e-4),
     )
 
     # --- Training ------------------------------------------------------------
@@ -134,10 +138,13 @@ def main():
         loss_fn               = loss_fn,
         optimizer             = optimizer,
         device                = device,
-        max_epochs            = cfg["training"]["max_epochs"],
+        max_epochs            = train_cfg.get("max_epochs", 50),
         checkpoint_dir        = checkpoint_path,
         incomplete_simulation = incomplete_sim,
         source2_enabled       = source2_ok,
+        patience              = train_cfg.get("patience", 7),
+        lambda_pseudo         = train_cfg.get("lambda_pseudo", 0.1),
+        disable_early_stopping_if_mock = args.mock,
     )
     trainer.fit(train_loader=loader, eval_loader=eval_loader)
 

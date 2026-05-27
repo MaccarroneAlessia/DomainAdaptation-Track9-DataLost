@@ -11,8 +11,14 @@ logging:
 # --- Iperparametri specifici di questa versione ------------------------------
 training:
   max_epochs:    30
+  patience:      7
   learning_rate: 1.0e-4
   lambda_adv:    0.1
+  lambda_pseudo: 0.1
+
+model:
+  temperature:  0.1
+  ema_momentum: 0.9
 
 # --- Hardware: modifica qui se giri su L40S invece di K80 -------------------
 hardware:

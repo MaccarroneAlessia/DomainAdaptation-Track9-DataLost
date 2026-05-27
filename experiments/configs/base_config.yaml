@@ -2,7 +2,7 @@
 
 # --- Percorsi (adattati al cluster DMI) --------------------------------------
 paths:
-  data_root:   "../../data"          # relativo a src/  oppure /shared/data/pytorch
+  data_root:   "../../data"          # relativo a src/ (su cluster meglio path assoluto via override)
   output_dir:  "experiments/logs"
   checkpoint:  "experiments/checkpoints"
 
@@ -19,6 +19,8 @@ data:
 model:
   encoder:       "r2plus1d_18"       # <-- Modificato allo stato dell'arte
   pretrained:    false # senza internet
+  temperature:   0.1                 # τ ensemble semantico
+  ema_momentum:  0.9                 # EMA centroidi (0.99 più stabile con batch piccoli)
   feature_dim:   512
   num_classes:
     source1:     51                  # HMDB-51
@@ -29,8 +31,10 @@ model:
 # --- Training ----------------------------------------------------------------
 training:
   max_epochs:    30
+  patience:      7
   learning_rate: 1.0e-4
   weight_decay:  1.0e-4
+  lambda_pseudo: 0.1
   #lambda_adv:    0.1                 # peso della loss avversariale
   lambda_adv: 0.0  # 0.0 per spegnere la Domain Adaptation e avere il puro Zero-Shot Baseline
   # il modello addestrerà solo le teste di classificazione condivise e farà test zero-shot su Kinetics

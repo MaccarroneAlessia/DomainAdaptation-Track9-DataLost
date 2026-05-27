@@ -1,4 +1,5 @@
-# a loss combinata (L_{total} = L_{cls} + lambda L_{adv}).
+# L_total = L_cls + lambda_adv * L_adv (+ pseudo nel trainer) loss combinata con pseudo labeling
+# Il trainer usa ce / classification_loss / adversarial_loss, non forward() intero.
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -14,7 +15,7 @@ class MultiSourceLoss(nn.Module):
     def __init__(self, lambda_adv: float = 0.1):
         super().__init__()
         self.lambda_adv = lambda_adv
-        self.ce = nn.CrossEntropyLoss()
+        self.ce = nn.CrossEntropyLoss(label_smoothing=0.1)
 
     def classification_loss(
         self,
@@ -41,7 +42,9 @@ class MultiSourceLoss(nn.Module):
         logits_s2, labels_s2,
         dom_logits, dom_labels,
     ) -> dict:
-        L_cls = self.classification_loss(logits_s1, labels_s1, logits_s2, labels_s2)
+        loss_s1 = self.ce(logits_s1, labels_s1)
+        loss_s2 = self.ce(logits_s2, labels_s2)
+        L_cls = loss_s1 + loss_s2
         L_adv = self.adversarial_loss(dom_logits, dom_labels)
         L_tot = L_cls + self.lambda_adv * L_adv
 
@@ -50,6 +53,6 @@ class MultiSourceLoss(nn.Module):
             "loss_total": L_tot,
             "loss_cls":   L_cls,
             "loss_adv":   L_adv,
-            "loss_cls_s1":  self.ce(logits_s1, labels_s1).item(),
-    "loss_cls_s2":  self.ce(logits_s2, labels_s2).item(),
+            "loss_cls_s1":  loss_s1.item(),
+            "loss_cls_s2":  loss_s2.item(),
         }

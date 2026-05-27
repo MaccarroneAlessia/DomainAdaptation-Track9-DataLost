@@ -1,5 +1,4 @@
 import os
-import random
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -40,6 +39,9 @@ class Trainer:
         checkpoint_dir: str = "experiments/checkpoints",
         incomplete_simulation: bool = True,
         source2_enabled: bool = True,
+        patience: int = 7,  # EARLY STOPPING: max epoche senza miglioramenti
+        lambda_pseudo: float = 0.1,
+        disable_early_stopping_if_mock: bool = False,  # True solo con dati mock (main --mock)
     ):
         self.model = model
         self.loss_fn = loss_fn
@@ -49,6 +51,10 @@ class Trainer:
         self.checkpoint_dir = checkpoint_dir
         self.incomplete_simulation = incomplete_simulation
         self.source2_enabled = source2_enabled
+        self.patience = patience
+        self.lambda_pseudo = lambda_pseudo
+        self.disable_early_stopping_if_mock = disable_early_stopping_if_mock
+        self.epochs_without_improvement = 0
         
         # Creazione della cartella per i checkpoint
         os.makedirs(checkpoint_dir, exist_ok=True)
@@ -56,7 +62,13 @@ class Trainer:
         # Miglior accuratezza sul target per salvare il checkpoint ottimale
         self.best_tgt_acc = -1.0
 
-        
+    def _schedule_disc_dropout(self, epoch: int) -> None:
+        # dropout alto all'inizio (GRL debole) → scende con le epoche
+        frac = epoch / max(self.max_epochs - 1, 1)
+        p = max(0.2, 0.5 - 0.3 * frac)
+        if hasattr(self.model, "discriminator"):
+            self.model.discriminator.set_dropout(p)
+
     # scheduling
     def _compute_alpha(self, epoch: int, step: int, num_steps: int) -> float:
         """
@@ -76,23 +88,52 @@ class Trainer:
             except Exception:
                 pass
 
-    # ─ Checkpoint 
+    # ─ Checkpoint / Resume
 
-    def _save_checkpoint(self, epoch: int, acc: float) -> None:
-        """Salva il modello se l'accuracy sul target è migliorata."""
-        if acc <= self.best_tgt_acc:
-            return
-        self.best_tgt_acc = acc
-        path = os.path.join(self.checkpoint_dir, "best_model.pth")
-        torch.save({
+    def resume(self, checkpoint_path: str = None) -> int:
+        """Riprende il training da un checkpoint. Ritorna l'epoca di partenza."""
+        if checkpoint_path is None:
+            checkpoint_path = os.path.join(self.checkpoint_dir, "latest_checkpoint.pth")
+            
+        if not os.path.exists(checkpoint_path):
+            print(f"[RESUME] Nessun checkpoint trovato in {checkpoint_path}. Partenza da zero.")
+            return 0
+            
+        print(f"[RESUME] Caricamento checkpoint da {checkpoint_path}...")
+        checkpoint = torch.load(checkpoint_path, map_location=self.device)
+        self.model.load_state_dict(checkpoint["model_state_dict"])
+        self.optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
+        self.best_tgt_acc = checkpoint.get("best_acc", -1.0)
+        self._global_step = checkpoint.get("global_step", 0)
+        self.epochs_without_improvement = checkpoint.get("epochs_without_improvement", 0)
+
+        # I centroidi sono già in model_state_dict (register_buffer); niente assegnazione manuale
+        start_epoch = checkpoint.get("epoch", -1) + 1
+        print(f"[RESUME] Training ripreso dall'epoca {start_epoch} (global_step: {self._global_step}, patience usata: {self.epochs_without_improvement}/{self.patience}) con best acc {self.best_tgt_acc:.2f}%")
+        return start_epoch
+
+    def _save_checkpoint(self, epoch: int, acc: float, is_best: bool = False) -> None:
+        """Salva il modello (latest e opzionalmente best)."""
+        state = {
             "epoch":                epoch,
+            "global_step":          self._global_step,
             "model_state_dict":     self.model.state_dict(),
             "optimizer_state_dict": self.optimizer.state_dict(),
             "best_acc":             self.best_tgt_acc,
+            "epochs_without_improvement": self.epochs_without_improvement,
             "s1_centroid":          self.model.s1_centroid,
             "s2_centroid":          self.model.s2_centroid,
-        }, path)
-        print(f"     [BEST] Checkpoint salvato → {path}  (acc={acc:.2f}%)")
+        }
+        
+        # Salva sempre l'ultimo checkpoint per la fault tolerance
+        latest_path = os.path.join(self.checkpoint_dir, "latest_checkpoint.pth")
+        torch.save(state, latest_path)
+        print(f"     [SAVE] Checkpoint epoca {epoch+1} salvato → {latest_path}")
+
+        if is_best:
+            best_path = os.path.join(self.checkpoint_dir, "best_model.pth")
+            torch.save(state, best_path)
+            print(f"     [BEST] Nuovo best model salvato → {best_path}  (acc={acc:.2f}%)")
 
     # ─ Singolo step 
 
@@ -117,9 +158,9 @@ class Trainer:
         active_s1 = True
         active_s2 = self.source2_enabled
         if self.incomplete_simulation:
-            if random.random() < 0.1 and active_s2:
+            if torch.rand(1).item() < 0.1 and active_s2:
                 active_s1 = False
-            elif random.random() < 0.1 and active_s1:
+            elif torch.rand(1).item() < 0.1 and active_s1:
                 active_s2 = False
 
         # 4. Forward pass
@@ -130,14 +171,14 @@ class Trainer:
 
         if active_s1:
             cls_s1, dom_s1, _, _ = self.model(x_s1, domain=0)
-            loss_cls_s1 = F.cross_entropy(cls_s1, y_s1)
+            loss_cls_s1 = self.loss_fn.ce(cls_s1, y_s1)
             loss_cls = loss_cls + loss_cls_s1
             dom_logits_list.append(dom_s1)
             dom_labels_list.append(d_s1)
 
         if active_s2:
             cls_s2, dom_s2, _, _ = self.model(x_s2, domain=1)
-            loss_cls_s2 = F.cross_entropy(cls_s2, y_s2)
+            loss_cls_s2 = self.loss_fn.ce(cls_s2, y_s2)
             loss_cls = loss_cls + loss_cls_s2
             dom_logits_list.append(dom_s2)
             dom_labels_list.append(d_s2)
@@ -151,13 +192,18 @@ class Trainer:
         ratio_s1  = loss_cls_s1.item() / total_inf
         ratio_s2  = loss_cls_s2.item() / total_inf
 
-        # 6. Pesi ensemble dinamici (similarità coseno sui centroidi EMA)
+        # 6. Pesi ensemble (stessa τ del modello, non hardcoded)
+        tau = getattr(self.model, "temperature", 0.1)
         with torch.no_grad():
-            if self.model.s1_centroid_initialized and self.model.s2_centroid_initialized:
+            both_ready = (
+                self.model.s1_centroid_initialized.item()
+                and self.model.s2_centroid_initialized.item()
+            )
+            if both_ready:
                 mu = feat_tgt.mean(dim=0)
                 s1 = F.cosine_similarity(mu.unsqueeze(0), self.model.s1_centroid.unsqueeze(0), eps=1e-8)
                 s2 = F.cosine_similarity(mu.unsqueeze(0), self.model.s2_centroid.unsqueeze(0), eps=1e-8)
-                w1, w2 = torch.softmax(torch.stack([s1, s2]) / 0.1, dim=0)
+                w1, w2 = torch.softmax(torch.stack([s1, s2]) / tau, dim=0)
                 w1, w2 = w1.item(), w2.item()
             else:
                 w1 = w2 = 0.5
@@ -169,18 +215,19 @@ class Trainer:
             reduction="batchmean",
         )
 
-        # 8. Loss avversariale
-        loss_adv = F.cross_entropy(
+        # 8. Loss avversariale (helper di MultiSourceLoss, stesso CE del modulo losses)
+        loss_adv = self.loss_fn.adversarial_loss(
             torch.cat(dom_logits_list, dim=0),
             torch.cat(dom_labels_list, dim=0),
         )
 
         # 9. Loss totale
-        loss_total = (loss_cls + 0.1 * loss_tgt_pseudo) + self.loss_fn.lambda_adv * loss_adv
+        loss_total = (loss_cls + self.lambda_pseudo * loss_tgt_pseudo) + self.loss_fn.lambda_adv * loss_adv
 
         # 10. Backward
         self.optimizer.zero_grad()
         loss_total.backward()
+        torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=1.0)
         self.optimizer.step()
 
         # 11. Domain confusion (no grad)
@@ -220,6 +267,7 @@ class Trainer:
         Restituisce il dizionario delle metriche medie dell'epoca.
         """
         self.model.train()
+        self._schedule_disc_dropout(epoch)
         num_steps = len(train_loader)
 
         # Accumulatori
@@ -304,13 +352,20 @@ class Trainer:
             "epoch/num":         epoch + 1,
         })
 
-        self._save_checkpoint(epoch, acc_head)
+        is_best = acc_head > self.best_tgt_acc
+        if is_best:
+            self.best_tgt_acc = acc_head
+            self.epochs_without_improvement = 0
+        else:
+            self.epochs_without_improvement += 1
+
+        self._save_checkpoint(epoch, acc_head, is_best=is_best)
 
         return {"acc_head": acc_head, "acc_ensemble": acc_ens}
 
     # ─ Loop principale 
 
-    def fit(self, train_loader, eval_loader) -> None:
+    def fit(self, train_loader, eval_loader, auto_resume: bool = True, resume_path: str = None) -> None:
         """
         fit()                               ← orchestrazione chiama :
             ├── train_epoch()               ← aggrega gli step, logga per epoca
@@ -325,12 +380,16 @@ class Trainer:
         """
         print("\n" + "=" * 50)
         print(f"Inizio training su {self.device}")
-        print(f"Epoche: {self.max_epochs} | "
+        print(f"Epoche massime: {self.max_epochs} | "
               f"Incomplete sim: {self.incomplete_simulation} | "
               f"Source2: {self.source2_enabled}")
         print("=" * 50)
 
-        for epoch in range(self.max_epochs):
+        start_epoch = 0
+        if auto_resume:
+            start_epoch = self.resume(resume_path)
+
+        for epoch in range(start_epoch, self.max_epochs):
 
             # Training
             train_metrics = self.train_epoch(train_loader, epoch)
@@ -354,5 +413,10 @@ class Trainer:
             # Valutazione
             self.evaluate(eval_loader, epoch)
             print("-" * 50)
+            
+            # Con mock l'acc target resta ~0% → salta early stop se disable_early_stopping_if_mock
+            if self.epochs_without_improvement >= self.patience and not self.disable_early_stopping_if_mock:
+                print(f"\n[EARLY STOPPING] Nessun miglioramento per {self.patience} epoche consecutive. Training interrotto all'epoca {epoch+1}.")
+                break
 
         print(f"\nTraining completato. Best acc target: {self.best_tgt_acc:.2f}%")
