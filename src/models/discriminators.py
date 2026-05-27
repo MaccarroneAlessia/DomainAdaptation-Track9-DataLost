@@ -7,7 +7,7 @@ from torch.autograd import Function
 class GRLFunction(Function): # torch.autograd.Function
     @staticmethod
     def forward(ctx, x, alpha):
-        ctx.alpha = alpha # salva alpha nel ctx per usarla in backward
+        ctx.save_for_backward(torch.tensor(alpha))
         # save_for_backward per i tensori più robusto 
         return x.view_as(x)
 
@@ -16,7 +16,7 @@ class GRLFunction(Function): # torch.autograd.Function
         # Inverte il gradiente durante la backpropagation
         # neg() * alpha → il discriminatore "spinge" l'encoder
         # verso feature domain-invarianti
-        output = grad_output.neg() * ctx.alpha
+        output = grad_output.neg() * ctx.saved_tensors[0].item()
         return output, None
         # None per alpha, che non è un tensore e non ha gradiente
 
@@ -42,22 +42,27 @@ class DomainDiscriminator(nn.Module):
     Architettura semplice, se fosse troppo potente
     vince sull'encoder e l'addestramento diverge.
     """
-    def __init__(self, input_dim: int = 512, num_domains: int = 3):
+    def __init__(self, input_dim: int = 512, num_domains: int = 3, dropout_p: float = 0.3):
         super().__init__()
 
         # GRL è ora separato -> aggiornare alpha a ogni epoca senza ricostruire il discriminatore
         self.grl = GRL(alpha=1.0)
+        self.dropout = nn.Dropout(dropout_p)
 
         self.net = nn.Sequential(
             nn.Linear(input_dim, 256),
             nn.ReLU(),
-            nn.Dropout(0.3),
+            self.dropout,
             nn.Linear(256, num_domains)
         )
 
     def set_alpha(self, alpha: float):
         """Permette al trainer di schedulare alpha progressivamente."""
         self.grl.alpha = alpha
+        
+    def set_dropout(self, p: float):
+        """Permette al trainer di schedulare dinamicamente il dropout."""
+        self.dropout.p = p
 
     def forward(self, x: torch.Tensor):
         # Passaggio attraverso il Gradient Reversal Layer

@@ -86,9 +86,13 @@ class MultiSourceDANN(nn.Module):
             num_classes_s2: int = 5, 
             num_classes_tgt: int = 400, 
             pretrained: bool = True, 
-            backbone_type: str = "r3d_18"
+            backbone_type: str = "r3d_18",
+            temperature: float = 0.1,
+            ema_momentum: float = 0.9
     ):
         super().__init__()
+        self.temperature = temperature
+        self.ema_momentum = ema_momentum
 
 
         # 1: Shared Feature Encoder (La CNN che estrae le feature video)
@@ -126,8 +130,8 @@ class MultiSourceDANN(nn.Module):
         # 5. Matrici di overlap semantico
         # Caricamento delle matrici di similarità semantica per proiettare le classi sorgente sul target
         base = os.path.join(os.path.dirname(__file__), "..", "datasets", "label_analysis_output")
-        m1_path = os.path.join(os.path.dirname(__file__), "..", "datasets", "label_analysis_output", "overlap_hmdb_kinetics.csv")
-        m2_path = os.path.join(os.path.dirname(__file__), "..", "datasets", "label_analysis_output", "overlap_ucf_kinetics.csv")
+        m1_path = os.path.join(base, "overlap_hmdb_kinetics.csv")
+        m2_path = os.path.join(base, "overlap_ucf_kinetics.csv")
         
         self.register_buffer("M1", load_overlap_matrix(m1_path, num_classes_s1, num_classes_tgt))
         self.register_buffer("M2", load_overlap_matrix(m2_path, num_classes_s2, num_classes_tgt))
@@ -136,8 +140,9 @@ class MultiSourceDANN(nn.Module):
         """Aggiorna il peso (alpha) del GRL per rendere l'adattamento progressivo 0->1."""
         self.discriminator.set_alpha(alpha)
 
-    def _update_centroid(self, domain: int, feat: torch.Tensor, momentum: float = 0.9) -> None:
+    def _update_centroid(self, domain: int, feat: torch.Tensor) -> None:
         """Aggiornamento EMA del centroide della sorgente indicata (solo in training)."""
+        momentum = self.ema_momentum
         batch_mean = feat.detach().mean(dim=0)
         if domain == 0:
             if not self.s1_centroid_initialized.item():
@@ -170,8 +175,7 @@ class MultiSourceDANN(nn.Module):
             mu = feat.mean(dim=0, keepdim=True)          # (1, 512)
             s1 = F.cosine_similarity(mu, self.s1_centroid.unsqueeze(0), eps=1e-8)
             s2 = F.cosine_similarity(mu, self.s2_centroid.unsqueeze(0), eps=1e-8)
-            w1, w2 = torch.softmax(torch.stack([s1, s2]) / 0.1, dim=0)
-            w1, w2 = w1.item(), w2.item()
+            w1, w2 = torch.softmax(torch.stack([s1, s2]) / self.temperature, dim=0)
         else:
             w1 = w2 = 0.5  # pesi uniformi finché i centroidi non sono pronti
 
