@@ -107,7 +107,7 @@ class Trainer:
         self._global_step = checkpoint.get("global_step", 0)
         self.epochs_without_improvement = checkpoint.get("epochs_without_improvement", 0)
 
-        # I centroidi sono già in model_state_dict (register_buffer); niente assegnazione manuale
+        # I buffer (centroidi inclusi) sono già ripristinati da load_state_dict.
         start_epoch = checkpoint.get("epoch", -1) + 1
         print(f"[RESUME] Training ripreso dall'epoca {start_epoch} (global_step: {self._global_step}, patience usata: {self.epochs_without_improvement}/{self.patience}) con best acc {self.best_tgt_acc:.2f}%")
         return start_epoch
@@ -121,8 +121,6 @@ class Trainer:
             "optimizer_state_dict": self.optimizer.state_dict(),
             "best_acc":             self.best_tgt_acc,
             "epochs_without_improvement": self.epochs_without_improvement,
-            "s1_centroid":          self.model.s1_centroid,
-            "s2_centroid":          self.model.s2_centroid,
         }
         
         # Salva sempre l'ultimo checkpoint per la fault tolerance
@@ -165,21 +163,15 @@ class Trainer:
 
         # 4. Forward pass
         dom_logits_list, dom_labels_list = [], []
-        loss_cls = torch.tensor(0.0, device=self.device)
-        loss_cls_s1 = torch.tensor(0.0, device=self.device)
-        loss_cls_s2 = torch.tensor(0.0, device=self.device)
+        cls_s1 = cls_s2 = None
 
         if active_s1:
             cls_s1, dom_s1, _, _ = self.model(x_s1, domain=0)
-            loss_cls_s1 = self.loss_fn.ce(cls_s1, y_s1)
-            loss_cls = loss_cls + loss_cls_s1
             dom_logits_list.append(dom_s1)
             dom_labels_list.append(d_s1)
 
         if active_s2:
             cls_s2, dom_s2, _, _ = self.model(x_s2, domain=1)
-            loss_cls_s2 = self.loss_fn.ce(cls_s2, y_s2)
-            loss_cls = loss_cls + loss_cls_s2
             dom_logits_list.append(dom_s2)
             dom_labels_list.append(d_s2)
 
@@ -187,12 +179,25 @@ class Trainer:
         dom_logits_list.append(dom_tgt)
         dom_labels_list.append(d_tgt)
 
-        # 5. Influence Ratio (proxy: loss classificazione per sorgente)
-        total_inf = loss_cls_s1.item() + loss_cls_s2.item() + 1e-8
-        ratio_s1  = loss_cls_s1.item() / total_inf
-        ratio_s2  = loss_cls_s2.item() / total_inf
+        # 5. Calcolo Losses tramite MultiSourceLoss
+        loss_dict = self.loss_fn(
+            dom_logits=torch.cat(dom_logits_list, dim=0),
+            dom_labels=torch.cat(dom_labels_list, dim=0),
+            logits_s1=cls_s1, labels_s1=y_s1 if active_s1 else None,
+            logits_s2=cls_s2, labels_s2=y_s2 if active_s2 else None,
+        )
 
-        # 6. Pesi ensemble (stessa τ del modello, non hardcoded)
+        loss_cls = loss_dict["loss_cls"]
+        loss_cls_s1_item = loss_dict["loss_cls_s1"]
+        loss_cls_s2_item = loss_dict["loss_cls_s2"]
+        loss_adv = loss_dict["loss_adv"]
+
+        # 6. Influence Ratio (proxy: loss classificazione per sorgente)
+        total_inf = loss_cls_s1_item + loss_cls_s2_item + 1e-8
+        ratio_s1  = loss_cls_s1_item / total_inf
+        ratio_s2  = loss_cls_s2_item / total_inf
+
+        # 7. Pesi ensemble (stessa τ del modello, non hardcoded)
         tau = getattr(self.model, "temperature", 0.1)
         with torch.no_grad():
             both_ready = (
@@ -208,21 +213,16 @@ class Trainer:
             else:
                 w1 = w2 = 0.5
 
-        # 7. Loss pseudo-labeling target (KL tra head_tgt e ensemble semantico)
+        # 8. Loss pseudo-labeling target (KL tra head_tgt e ensemble semantico)
         loss_tgt_pseudo = F.kl_div(
             F.log_softmax(cls_tgt, dim=-1),
-            ensemble_probs,
+            ensemble_probs.detach(),
             reduction="batchmean",
         )
 
-        # 8. Loss avversariale (helper di MultiSourceLoss, stesso CE del modulo losses)
-        loss_adv = self.loss_fn.adversarial_loss(
-            torch.cat(dom_logits_list, dim=0),
-            torch.cat(dom_labels_list, dim=0),
-        )
-
         # 9. Loss totale
-        loss_total = (loss_cls + self.lambda_pseudo * loss_tgt_pseudo) + self.loss_fn.lambda_adv * loss_adv
+        # La loss avversariale è già scalata dentro loss_dict["loss_total"]
+        loss_total = loss_dict["loss_total"] + self.lambda_pseudo * loss_tgt_pseudo
 
         # 10. Backward
         self.optimizer.zero_grad()
@@ -241,8 +241,8 @@ class Trainer:
         return {
             "loss_total":      loss_total.item(),
             "loss_cls":        loss_cls.item(),
-            "loss_cls_s1":     loss_cls_s1.item(),
-            "loss_cls_s2":     loss_cls_s2.item(),
+            "loss_cls_s1":     loss_cls_s1_item,
+            "loss_cls_s2":     loss_cls_s2_item,
             "loss_adv":        loss_adv.item(),
             "loss_tgt_pseudo": loss_tgt_pseudo.item(),
             "influence_s1":    ratio_s1,

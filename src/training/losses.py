@@ -1,5 +1,6 @@
-# L_total = L_cls + lambda_adv * L_adv (+ pseudo nel trainer) loss combinata con pseudo labeling
-# Il trainer usa ce / classification_loss / adversarial_loss, non forward() intero.
+# Loss base per training multi-source:
+# L_total = L_cls + lambda_adv * L_adv
+# Nota: il termine pseudo-label target viene aggiunto in trainer.py.
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -19,11 +20,16 @@ class MultiSourceLoss(nn.Module):
 
     def classification_loss(
         self,
-        logits_s1: torch.Tensor, labels_s1: torch.Tensor,
-        logits_s2: torch.Tensor, labels_s2: torch.Tensor,
+        logits_s1: torch.Tensor = None, labels_s1: torch.Tensor = None,
+        logits_s2: torch.Tensor = None, labels_s2: torch.Tensor = None,
     ) -> torch.Tensor:
         """Supervisione sui due domini sorgente."""
-        return self.ce(logits_s1, labels_s1) + self.ce(logits_s2, labels_s2)
+        loss = 0.0
+        if logits_s1 is not None and labels_s1 is not None:
+            loss = loss + self.ce(logits_s1, labels_s1)
+        if logits_s2 is not None and labels_s2 is not None:
+            loss = loss + self.ce(logits_s2, labels_s2)
+        return loss
 
     def adversarial_loss(
         self,
@@ -38,12 +44,15 @@ class MultiSourceLoss(nn.Module):
 
     def forward(
         self,
-        logits_s1, labels_s1,
-        logits_s2, labels_s2,
-        dom_logits, dom_labels,
+        dom_logits: torch.Tensor,
+        dom_labels: torch.Tensor,
+        logits_s1: torch.Tensor = None, labels_s1: torch.Tensor = None,
+        logits_s2: torch.Tensor = None, labels_s2: torch.Tensor = None,
     ) -> dict:
-        loss_s1 = self.ce(logits_s1, labels_s1)
-        loss_s2 = self.ce(logits_s2, labels_s2)
+        device = dom_logits.device
+        loss_s1 = self.ce(logits_s1, labels_s1) if logits_s1 is not None else torch.tensor(0.0, device=device)
+        loss_s2 = self.ce(logits_s2, labels_s2) if logits_s2 is not None else torch.tensor(0.0, device=device)
+        
         L_cls = loss_s1 + loss_s2
         L_adv = self.adversarial_loss(dom_logits, dom_labels)
         L_tot = L_cls + self.lambda_adv * L_adv

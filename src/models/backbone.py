@@ -1,5 +1,4 @@
-# classe dell'encoder (es. R3D-18)
-# Il cluster fornisce immagini Apptainer con PyTorch e pesi pre-caricati in /shared/sifs/latest.sif
+# Encoder video condiviso (R3D-18 o R(2+1)D-18).
 
 import torch
 import torch.nn as nn
@@ -27,14 +26,13 @@ class VideoEncoder(nn.Module):
     """
     def __init__(self, pretrained: bool = True, model_type: str = "r3d_18"):
         super(VideoEncoder, self).__init__()
-        # appunto: su nodi senza internet evito il download dei pesi (timeout breve)
-        if pretrained and not self._has_internet(timeout_s=3.0):
-            print("Warning: rete non disponibile, uso pretrained=False per evitare blocchi.")
-            pretrained = False
-        # caricamendo dei pesi preaddestrati di R3D-18 
-        # (nota : sul cluster i pesi sono già pre-scaricati nel container SIF per evitare problemi di rete)
-        #weights = R3D_18_Weights.DEFAULT if pretrained else None
-        #self.backbone = r3d_18(weights=weights)
+        # Evita tentativi di download su nodi senza rete.
+        #if pretrained and not self._has_internet(timeout_s=3.0):
+        #    print("Warning: rete non disponibile, uso pretrained=False per evitare blocchi.")
+        #    pretrained = False
+
+        # caricamendo dei pesi preaddestrati 
+        # (nota : sul cluster i pesi sono già pre-scaricati nel container SIF ?)
 
         # Scelta dell'architettura: R3D-18 (standard) oppure R(2+1)D-18 (stato dell'arte)
         if model_type == "r2plus1d_18":
@@ -68,7 +66,7 @@ class VideoEncoder(nn.Module):
             return True
         except Exception:
             return False
-        
+
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         # Input shape standard: (B, C, T, H, W) -> (Batch, 3, 16, 112, 112)
         # Se l'input proviene da datasets.py ed è (B, T, C, H, W) con T=16 e C=3:

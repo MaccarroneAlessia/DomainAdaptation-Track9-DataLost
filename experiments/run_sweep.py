@@ -2,10 +2,9 @@
 # esempio che l'agente di W&B userà per lanciare gli esperimenti
 # inizializza lo state object da wandb.config e lo inietta nell'ottimizzatore e nel loop di training
 
-# wandb sweep experiments/configs/sweep.yaml
-# restituisce id
-# wandb agent utente/progetto/ID
-# wandb sweep run_sweep.py
+# Esecuzione sweep:
+# 1) wandb sweep experiments/configs/sweep.yaml
+# 2) wandb agent <entity>/<project>/<sweep_id>
 
 import sys
 import os
@@ -13,7 +12,7 @@ import torch
 import torch.optim as optim
 import wandb
 
-# pacchetto src
+# Import da src/
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'src')))
 
 from main import MockMultiSourceDataLoader  # stesso mock del dry-run
@@ -22,13 +21,13 @@ from training.losses import MultiSourceLoss
 from training.trainer import Trainer
 
 def main():
-    # Inizializza run W&B (i parametri verranno iniettati dallo sweep agent)
+    # Parametri letti da wandb.config (iniettati dallo sweep agent)
     wandb.init()
     c = wandb.config
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-    # 1. Inizializza Modello con iperparametri statici (o dinamici se aggiunti allo sweep)
+    # Modello con iperparametri da sweep (fallback sensati)
     model = MultiSourceDANN(
         num_classes_s1=51,
         num_classes_s2=5,
@@ -39,7 +38,7 @@ def main():
         ema_momentum=getattr(c, "ema_momentum", 0.9),
     ).to(device)
 
-    # 2. Inizializza Loss e Ottimizzatore con iperparametri statici (o dinamici se aggiunti allo sweep)
+    # Loss + optimizer da sweep
     loss_fn = MultiSourceLoss(lambda_adv=c.lambda_adv)
     optimizer = optim.Adam(model.parameters(), lr=c.learning_rate)
 
@@ -59,7 +58,7 @@ def main():
     )
 
     trainer.fit(loader, eval_loader, auto_resume=False)
-    wandb.log({"eval/acc_head_tgt": trainer.best_tgt_acc})
+    wandb.log({"best_eval/acc_head_tgt": trainer.best_tgt_acc})
 
 
 if __name__ == "__main__":
