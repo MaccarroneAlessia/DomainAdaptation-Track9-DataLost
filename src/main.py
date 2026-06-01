@@ -1,12 +1,7 @@
-# main.py (dentro src/)
-
-# dalla root del progetto
-# apptainer run --nv /shared/sifs/latest.sif python src/main.py --config experiments/configs/base_config.yaml
 from datasets.datasets import build_dataloaders
 from models.model      import MultiSourceDANN
 from training.losses   import MultiSourceLoss
 from training.trainer  import Trainer
-# Integrazione Persona 3: modulo di valutazione strategica e weighting dinamico
 from evaluation.evaluator import DynamicEvaluationStrategist
 from evaluation.metrics   import compute_entropy, MetricsLogger, comparative_table
 
@@ -78,11 +73,8 @@ def evaluate_target(model, eval_loader, device, eval_strategist=None, epoch=0, t
     model.eval()
     correct_head = correct_ens = total = 0
 
-    # Risoluzione allineamento Loss: Estraiamo i valori correnti dall'altro script
     mapped_losses = {"total": 0.0, "cls_tgt": 0.0, "adv": 0.0, "pseudo": 0.0}
     if trainer_ref is not None:
-        # Se l'altro script espone le variabili dell'ultimo ciclo (es. nel log_dict o parametri)
-        # Cerchiamo di mappare in modo sicuro basandoci sulle stampe a schermo del trainer
         total_val = getattr(trainer_ref, 'last_loss_total', 0.0)
         cls_val   = getattr(trainer_ref, 'last_loss_cls', 0.0)
         adv_val   = getattr(trainer_ref, 'last_loss_adv', 0.0)
@@ -96,32 +88,37 @@ def evaluate_target(model, eval_loader, device, eval_strategist=None, epoch=0, t
                 "pseudo": ps_val
             }
 
+    # Spegnimento dei worker paralleli per l'evaluation
+    original_workers = eval_loader.num_workers if hasattr(eval_loader, 'num_workers') else 0
+    if hasattr(eval_loader, 'num_workers'):
+        eval_loader.num_workers = 0
+    if hasattr(eval_loader, 'pin_memory'):
+        eval_loader.pin_memory = False
+
     with torch.no_grad():
         for batch_idx, (frames, labels, _) in enumerate(eval_loader):
             frames = frames.to(device)
             labels = labels.to(device)
 
             cls_logits, domain_logits, features, ensemble_probs = model(frames, domain=2)
+            
+            cls_logits = cls_logits.detach()
+            features = features.detach()
+            ensemble_probs = ensemble_probs.detach()
 
             if eval_strategist is not None:
-                # Usa i centroidi EMA reali del modello se già inizializzati,
-                # altrimenti fallback neutro (media del batch corrente per entrambe)
-                c1_ready = model.s1_centroid_initialized.item()
-                c2_ready = model.s2_centroid_initialized.item()
+                c1_ready = model.s1_centroid_initialized.item() if hasattr(model, 's1_centroid_initialized') else False
+                c2_ready = model.s2_centroid_initialized.item() if hasattr(model, 's2_centroid_initialized') else False
                 if c1_ready and c2_ready:
-                    c1 = model.s1_centroid
-                    c2 = model.s2_centroid
+                    c1 = model.s1_centroid.detach()
+                    c2 = model.s2_centroid.detach()
                 else:
-                    # fallback: centroidi identici → pesi 0.5/0.5
-                    c1 = features.mean(dim=0)
-                    c2 = features.mean(dim=0)
+                    c1 = features.mean(dim=0).detach()
+                    c2 = features.mean(dim=0).detach()
 
                 w_s1, w_s2 = eval_strategist.compute_dynamic_weights(features, c1, c2)
-
-                # Entropy reale sui logits del target
                 ent = compute_entropy(cls_logits)
 
-                # Forniamo il dizionario allineato al logger di Persona 3
                 eval_strategist.log_batch_metrics(
                     epoch, batch_idx, w_s1, w_s2, 
                     loss_dict=mapped_losses, 
@@ -131,6 +128,10 @@ def evaluate_target(model, eval_loader, device, eval_strategist=None, epoch=0, t
             correct_head += (cls_logits.argmax(-1) == labels).sum().item()
             correct_ens  += (ensemble_probs.argmax(-1) == labels).sum().item()
             total        += labels.size(0)
+
+    # Ripristino dello stato originale del loader
+    if hasattr(eval_loader, 'num_workers'):
+        eval_loader.num_workers = original_workers
 
     if total == 0:
         return 0.0, 0.0
@@ -186,7 +187,7 @@ def train_and_report(current_cfg: dict, tag: str, loader, eval_loader, hmdb_map,
         loss_fn                        = loss_fn,
         optimizer                      = optimizer,
         device                         = device,
-        max_epochs                     = 1,  # Forziamo il trainer a fare una sola epoca per volta
+        max_epochs                     = max_epochs,  
         checkpoint_dir                 = checkpoint_path,
         incomplete_simulation          = ablation_cfg.get("incomplete_simulation", True),
         source2_enabled                = ablation_cfg.get("source2_enabled", True),
@@ -195,31 +196,21 @@ def train_and_report(current_cfg: dict, tag: str, loader, eval_loader, hmdb_map,
         disable_early_stopping_if_mock = is_mock,
     )
     
-    # LOOP EPOCH-BY-EPOCH: Permette di registrare la storia temporale ad ogni epoca
-    for epoch in range(1, max_epochs + 1):
-        print(f"\n--- Avvio Epoca {epoch}/{max_epochs} per {tag} ---")
-        trainer.max_epochs = epoch  # Estendiamo l'orizzonte massimo del trainer prima di chiamarlo
-        trainer.fit(train_loader=loader, eval_loader=eval_loader, auto_resume=True)
-        
-        # Chiamata di valutazione a fine epoca per collezionare le metriche
-        acc_head, acc_ens = evaluate_target(
-            model, eval_loader, device,
-            eval_strategist=eval_strategist,
-            epoch=epoch,
-            trainer_ref=trainer
-        )
-        print(f"[Epoca {epoch}] Target Acc (Head): {acc_head:.2f}% | Target Acc (Ensemble): {acc_ens:.2f}%")
-        
-        # Rispettiamo l'eventuale attivazione dell'early stopping calcolato internamente dal trainer
-        if hasattr(trainer, 'early_stop') and trainer.early_stop:
-            print(f"Early stopping rilevato. Interruzione addestramento all'epoca {epoch}.")
-            break
+    # Esegui il training (fit gestisce già il loop interno sulle epoche)
+    trainer.fit(train_loader=loader, eval_loader=eval_loader, auto_resume=True)
+    
+    # Valutazione finale dopo il training
+    acc_head, acc_ens = evaluate_target(
+        model, eval_loader, device,
+        eval_strategist=eval_strategist,
+        epoch=max_epochs,
+        trainer_ref=trainer
+    )
+    print(f"Target Acc Finale (Head): {acc_head:.2f}% | Target Acc (Ensemble): {acc_ens:.2f}%")
 
-    # Generazione dei grafici di convergenza e report testuale per questa run
     eval_strategist.generate_plots()
     eval_strategist.generate_markdown_report()
 
-    # Calcolo entropia finale head_s1 applicata sul target
     model.eval()
     entropy_list = []
     with torch.no_grad():
@@ -237,13 +228,12 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--config",          default="experiments/configs/base_config.yaml")
     parser.add_argument("--config-override", default=None)
-    parser.add_argument("--mock",            action="store_true", help="Usa dati fittizi/simulati per testare il pipeline offline")
-    parser.add_argument("--compare-da",      action="store_true", help="Confronta backbone-only (no DA) vs DA sul target")
+    parser.add_argument("--mock",            action="store_true")
+    parser.add_argument("--compare-da",      action="store_true")
     args = parser.parse_args()
 
     cfg = load_config(args.config, args.config_override)
 
-    # --- Riproducibilità -----------------------------------------------------
     seed = cfg["hardware"]["seed"]
     torch.manual_seed(seed)
     torch.cuda.manual_seed_all(seed)
@@ -252,13 +242,11 @@ def main():
     torch.backends.cudnn.deterministic = True
     torch.backends.cudnn.benchmark     = False
 
-    # --- Device --------------------------------------------------------------
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    print(f"Device: {device}")
+    print(f"Device rilevato per la sessione: {device}")
 
-    # --- Dati ----------------------------------------------------------------
     if args.mock:
-        print("\n[MOCK MODE] Inizializzazione dati simulati per dry-run...")
+        print("\n[MOCK MODE] Inizializzazione dati simulati...")
         hmdb_map = {f"class_{i}": i for i in range(51)}
         ucf_map  = {f"class_{i}": i for i in range(5)}
         kin_map  = {f"class_{i}": i for i in range(400)}
@@ -272,12 +260,9 @@ def main():
         )
         eval_loader = loader.get_target_eval_loader(batch_size=16)
 
-    print(f"Classi — S1: {len(hmdb_map)} | S2: {len(ucf_map)} | Tgt: {len(kin_map)}")
-
-    # -------------------------------------------------------------------------
+    print(f"Classi Caricate — S1 (HMDB): {len(hmdb_map)} | S2 (UCF): {len(ucf_map)} | Tgt (Kinetics): {len(kin_map)}")
 
     if args.compare_da:
-        # 1. Configurazione ed esecuzione Run Baseline (Senza Domain Adaptation)
         cfg_no_da = copy.deepcopy(cfg)
         cfg_no_da.setdefault("training", {})
         cfg_no_da["training"]["lambda_adv"]    = 0.0
@@ -287,16 +272,14 @@ def main():
             cfg_no_da, "Baseline_No_DA", loader, eval_loader, hmdb_map, ucf_map, kin_map, device, args.mock
         )
         
-        # 2. Configurazione ed esecuzione Run Avanzata (Con Domain Adaptation e Pesi Geometrici)
         best_da, ent_da, tag_da = train_and_report(
             cfg, "Weighted_DA", loader, eval_loader, hmdb_map, ucf_map, kin_map, device, args.mock
         )
 
         print("\n=== Confronto Target Terminato ===")
         print(f"Best acc head_tgt | no-DA: {best_no_da:.2f}% | DA: {best_da:.2f}%")
-        print(f"Entropy S1→target | no-DA: {ent_no_da:.4f} | DA: {ent_da:.4f}")
+        print(f"Entropy S1->target | no-DA: {ent_no_da:.4f} | DA: {ent_da:.4f}")
 
-        # --- AGGREGAZIONE FINALE MULTI-RUN (REPORT SINTETICO GLOBALE) ---
         print("\n[INFO] Rilevamento dei file di log per la generazione del Report di sintesi...")
         try:
             fn_no_da = tag_no_da.replace(" ", "_").replace("(", "").replace(")", "")
@@ -310,7 +293,6 @@ def main():
                 "Weighted DA": logger_da
             }
             
-            # Generazione tabelle fornite da Persona 3
             table_md    = comparative_table(runs_dict, latex=False)
             table_latex = comparative_table(runs_dict, latex=True)
             
@@ -326,29 +308,27 @@ def main():
                 f.write(table_latex)
                 f.write("\n```\n")
                 
-            print("📈 [MINIMUM OBJECTIVE] File 'docs/REPORT.md' generato con successo contenente le tabelle comparative!")
+            print("📈 [MINIMUM OBJECTIVE] File 'docs/REPORT.md' generato con successo!")
             
         except Exception as e:
             print(f"[ATTENZIONE] Errore durante la creazione del report comparativo aggregato: {e}")
-            print("I singoli report di run sono comunque disponibili nella cartella dei log.")
 
     else:
         best_acc, avg_entropy, _ = train_and_report(
             cfg, "Training_Singolo", loader, eval_loader, hmdb_map, ucf_map, kin_map, device, args.mock
         )
-        print("\n=== Baseline source-only (senza DA) ===")
+        print("\n=== Pipeline Conclusa ===")
         print(f"Migliore accuratezza Target: {best_acc:.2f}%")
-        print(f"Entropia media head_s1 → target: {avg_entropy:.4f}")
-        print(f"(Valore alto = encoder non adattato; con DA dovrebbe scendere)")
+        print(f"Entropia media head_s1 -> target: {avg_entropy:.4f}")
 
 
 if __name__ == "__main__":
     main()
-
+    
 # python src/main.py --config experiments/configs/base_config.yaml
 
 
-# scp -r .\src\* mcclss01m52d960x@gcluster.dmi.unict.it:~/DomainAdaptation-Track9-DataLost/src/
+# scp -r .\src\* vllmtt02t20b429t@gcluster.dmi.unict.it:~/DomainAdaptation-Track9-DataLost/src/
 
 # ssh codice
 # srun --account=dl-course-q2 --partition=dl-course-q2 --qos=gpu-medium --gres=gpu:1 --gres=shard:5632 --pty bash
@@ -360,3 +340,4 @@ if __name__ == "__main__":
 #    python main.py \
 #    --config          experiments/configs/base_config.yaml \
 #    --config-override experiments/configs/model_v1.yaml
+

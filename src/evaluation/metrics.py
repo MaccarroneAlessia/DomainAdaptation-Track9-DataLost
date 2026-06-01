@@ -1,35 +1,3 @@
-"""
-metrics.py — Training Metrics Logger & Evaluator
-=================================================
-Persona 3 — Weighting & Evaluation Strategist
-
-Tracks per-epoch:
-  • target accuracy (head_tgt)
-  • source influence ratio  S1 / (S1 + S2)   [from DynamicWeighter]
-  • per-component losses: cls_s1, cls_s2, cls_tgt, adv, pseudo
-  • average prediction entropy on target
-
-All data is stored in plain Python lists → easy to serialise (JSON / pickle)
-and plot with matplotlib.
-
-Usage
------
-    from evaluation.metrics import MetricsLogger, compute_entropy
-
-    logger = MetricsLogger()
-
-    # inside training loop:
-    logger.log_batch(w1=0.6, w2=0.4, loss_dict={...})
-
-    # at epoch end:
-    logger.end_epoch(target_acc=42.3)
-
-    # save / plot:
-    logger.save("experiments/logs/run_01.json")
-    fig = logger.plot()
-    fig.savefig("figures/training_curves.png", dpi=150)
-"""
-
 from __future__ import annotations
 
 import json
@@ -46,17 +14,7 @@ import torch
 # ──────────────────────────────────────────────────────────────────────────────
 
 def compute_entropy(logits: torch.Tensor) -> float:
-    """
-    Mean Shannon entropy of a batch of logits.
-
-    Args
-    ----
-    logits : [B, C]  — raw (un-normalised) class scores
-
-    Returns
-    -------
-    float  — mean entropy in nats (per sample)
-    """
+    """Mean Shannon entropy of a batch of logits."""
     with torch.no_grad():
         probs = logits.softmax(dim=-1).clamp(min=1e-9)
         entropy = -(probs * probs.log()).sum(dim=-1)  # [B]
@@ -75,24 +33,7 @@ def compute_accuracy(logits: torch.Tensor, labels: torch.Tensor) -> float:
 # ──────────────────────────────────────────────────────────────────────────────
 
 class MetricsLogger:
-    """
-    Accumulates batch-level statistics and aggregates them at epoch boundaries.
-
-    Attributes (per-epoch lists, after calling end_epoch)
-    -------------------------------------------------------
-    epochs         : list[int]
-    target_acc     : list[float]    — % accuracy on target (head_tgt)
-    influence_s1   : list[float]    — mean w1 over all batches in epoch
-    influence_s2   : list[float]    — mean w2
-    loss_total     : list[float]
-    loss_cls_s1    : list[float]
-    loss_cls_s2    : list[float]
-    loss_cls_tgt   : list[float]
-    loss_adv       : list[float]
-    loss_pseudo    : list[float]
-    entropy_tgt    : list[float]    — mean prediction entropy on target
-    epoch_duration : list[float]    — seconds per epoch
-    """
+    """Accumulates batch-level statistics and aggregates them at epoch boundaries."""
 
     _LOSS_KEYS = ("total", "cls_s1", "cls_s2", "cls_tgt", "adv", "pseudo")
 
@@ -111,8 +52,6 @@ class MetricsLogger:
 
         self._epoch_start = time.time()
 
-    # ── batch-level ──────────────────────────────────────────────────────────
-
     def log_batch(
         self,
         w1: float,
@@ -120,15 +59,6 @@ class MetricsLogger:
         loss_dict: dict[str, float],
         entropy: float | None = None,
     ):
-        """
-        Call once per training batch.
-
-        Parameters
-        ----------
-        w1, w2    : source weights from DynamicWeighter (should sum to ~1)
-        loss_dict : keys are a subset of {"total","cls_s1","cls_s2","cls_tgt","adv","pseudo"}
-        entropy   : optional pre-computed target entropy for this batch
-        """
         self._acc_w1.append(float(w1))
         self._acc_w2.append(float(w2))
         for k in self._LOSS_KEYS:
@@ -137,21 +67,11 @@ class MetricsLogger:
         if entropy is not None:
             self._acc_entropy.append(float(entropy))
 
-    # ── epoch-level ──────────────────────────────────────────────────────────
-
     def end_epoch(
         self,
         target_acc: float,
         epoch: int | None = None,
     ):
-        """
-        Finalise the current epoch.  Call after iterating the full eval loader.
-
-        Parameters
-        ----------
-        target_acc : float  — accuracy (%) on target set
-        epoch      : int    — epoch index; auto-increments if None
-        """
         ep = epoch if epoch is not None else (len(self.epochs) + 1)
         self.epochs.append(ep)
         self.target_acc.append(float(target_acc))
@@ -188,8 +108,6 @@ class MetricsLogger:
         self._acc_losses: dict[str, list[float]] = {k: [] for k in self._LOSS_KEYS}
         self._acc_entropy: list[float] = []
 
-    # ── serialisation ────────────────────────────────────────────────────────
-
     def state_dict(self) -> dict[str, Any]:
         return {
             "run_name":       self.run_name,
@@ -220,8 +138,6 @@ class MetricsLogger:
         obj.load_state_dict(d)
         return obj
 
-    # ── console summary ───────────────────────────────────────────────────────
-
     def print_last(self):
         if not self.epochs:
             print("[MetricsLogger] No epochs logged yet.")
@@ -240,21 +156,17 @@ class MetricsLogger:
             f"L_tot={lt:.4f}"
         )
 
-    # ── plotting ──────────────────────────────────────────────────────────────
-
     def plot(self, figsize: tuple[int, int] = (14, 10)):
-        """
-        Returns a matplotlib Figure with 4 subplots:
-          1. Target accuracy evolution
-          2. Source influence ratio (S1 vs S2)
-          3. Loss components
-          4. Target entropy
-        """
+        """Returns a matplotlib Figure with 4 subplots."""
         try:
             import matplotlib.pyplot as plt
             import matplotlib.gridspec as gridspec
         except ImportError:
             raise ImportError("matplotlib is required for plotting. pip install matplotlib")
+
+        # Reset preventivo della memoria grafica per evitare blocchi a fine epoca
+        plt.clf()
+        plt.close('all')
 
         fig = plt.figure(figsize=figsize)
         fig.suptitle(f"Training Curves — {self.run_name}", fontsize=14, fontweight="bold")
@@ -329,23 +241,7 @@ def comparative_table(
     runs: dict[str, "MetricsLogger"],
     latex: bool = False,
 ) -> str:
-    """
-    Build a text/LaTeX table comparing multiple runs.
-
-    Parameters
-    ----------
-    runs   : dict  name → MetricsLogger
-    latex  : bool  if True, return LaTeX tabular; else plain text
-
-    Example
-    -------
-    >>> table = comparative_table({
-    ...     "Baseline":     logger_base,
-    ...     "Multi-Source": logger_ms,
-    ...     "Weighted DA":  logger_w,
-    ... })
-    >>> print(table)
-    """
+    """Build a text/LaTeX table comparing multiple runs."""
     headers = ["Run", "Best Acc (%)", "Last Acc (%)", "Min Entropy", "Mean w(S1)", "Mean w(S2)"]
     rows = []
     for name, lg in runs.items():

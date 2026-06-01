@@ -14,3 +14,5 @@ experiments/checkpoints/
 *.log
 
 .DS_Store
+
+run.sh

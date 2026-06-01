@@ -5,9 +5,8 @@ paths:
   data_root:   "../../data"          # relativo a src/ (su cluster meglio path assoluto via override)
   output_dir:  "experiments/logs"
   checkpoint:  "experiments/checkpoints"
-
-#data_root: /shared/data/pytorch
-#output_dir: ./experiments/logs/
+  #data_root: "/shared/data/pytorch"
+  #output_dir: ./experiments/logs/
 
 # --- Dataset -----------------------------------------------------------------
 data:
@@ -30,7 +29,7 @@ model:
 
 # --- Training ----------------------------------------------------------------
 training:
-  max_epochs:    30
+  max_epochs:    10
   patience:      7
   learning_rate: 1.0e-4
   weight_decay:  1.0e-4

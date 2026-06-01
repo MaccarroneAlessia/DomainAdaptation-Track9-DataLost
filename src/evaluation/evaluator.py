@@ -1,25 +1,3 @@
-"""
-evaluation/evaluator.py  (aggiornato)
-======================================
-Contiene DUE classi pubbliche:
-
-  1. Evaluator                    — pipeline completa (richiede modello + loader)
-  2. DynamicEvaluationStrategist  — adapter leggero usato da main.py
-                                    NON modifica trainer.py né il resto del codice
-
-DynamicEvaluationStrategist espone esattamente l'API già chiamata in main.py:
-
-    strategist = DynamicEvaluationStrategist(temperature=0.5)
-    w1, w2 = strategist.compute_dynamic_weights(feat_tgt, feat_s1, feat_s2)
-    strategist.log_batch_metrics(epoch, batch_idx, w1, w2)
-    strategist.update_accuracy_evolution(epoch, acc_head, acc_ens)
-    strategist.generate_plots()
-    strategist.generate_markdown_report()
-
-Internamente delega tutto a MetricsLogger e CosineWeighter — nessuna
-logica duplicata.
-"""
-
 from __future__ import annotations
 
 import os
@@ -32,22 +10,19 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch.utils.data import DataLoader
 
+# Forza matplotlib a usare un backend non interattivo prima di qualsiasi altra importazione grafica
+import matplotlib
+matplotlib.use('Agg')
+import matplotlib.pyplot as plt
+
 from evaluation.weighting import CosineWeighter, AttentionWeighter, CentroidTracker
 from evaluation.metrics   import MetricsLogger, compute_entropy, compute_accuracy, comparative_table
 
 
-# ══════════════════════════════════════════════════════════════════════════════
-# 1. Evaluator  (pipeline completa, opzionale — per uso avanzato)
-# ══════════════════════════════════════════════════════════════════════════════
-
 class Evaluator:
     """
-    Pipeline di valutazione completa.
-    Da usare se vuoi un oggetto che gestisce autonomamente modello + loader.
-
-    Per l'integrazione con main.py usa invece DynamicEvaluationStrategist.
+    Pipeline di valutazione completa (opzionale — per uso avanzato).
     """
-
     def __init__(
         self,
         model:             nn.Module,
@@ -127,7 +102,6 @@ class Evaluator:
                   perplexity: int = 30, random_state: int = 42):
         try:
             from sklearn.manifold import TSNE
-            import matplotlib.pyplot as plt
             import matplotlib.cm as cm
             import numpy as np
         except ImportError:
@@ -141,7 +115,7 @@ class Evaluator:
         dom_ids    = []
         for i, (_, (e, _)) in enumerate(embeddings_dict.items()):
             dom_ids.extend([i] * len(e))
-        dom_ids = __import__("numpy").array(dom_ids)
+        dom_ids = np.array(dom_ids)
 
         coords = TSNE(n_components=2, perplexity=perplexity,
                       random_state=random_state).fit_transform(all_embs)
@@ -168,27 +142,10 @@ class Evaluator:
         return fig
 
 
-# ══════════════════════════════════════════════════════════════════════════════
-# 2. DynamicEvaluationStrategist  ← questo è ciò che main.py importa
-# ══════════════════════════════════════════════════════════════════════════════
-
 class DynamicEvaluationStrategist:
     """
-    Adapter leggero che espone l'API chiamata da main.py e delega
-    internamente a MetricsLogger + CosineWeighter.
-
-    Non richiede né modello né loader — riceve solo i tensori già
-    estratti da main.py durante la sua evaluate_target().
-
-    API pubblica (esattamente quella già chiamata in main.py)
-    ---------------------------------------------------------
-    compute_dynamic_weights(feat_tgt, feat_s1, feat_s2) -> (w1, w2)
-    log_batch_metrics(epoch, batch_idx, w1, w2)
-    update_accuracy_evolution(epoch, acc_head, acc_ens)
-    generate_plots(output_dir)
-    generate_markdown_report(output_dir)
+    Adapter leggero che espone l'API chiamata da main.py e delega internamente.
     """
-
     def __init__(
         self,
         temperature:  float = 0.5,
@@ -203,34 +160,25 @@ class DynamicEvaluationStrategist:
         self._weighter = CosineWeighter(temperature=temperature)
         self._logger   = MetricsLogger(run_name=self.run_name)
 
-        # Buffer per aggregare le batch-metrics prima di chiudere l'epoca
-        # (end_epoch viene chiamato in update_accuracy_evolution)
         self._pending_w1:    list[float] = []
         self._pending_w2:    list[float] = []
         self._pending_ent:   list[float] = []
         self._pending_losses: dict[str, list[float]] = {}
 
-        # Per tabella comparativa multi-run
         self._acc_head_history: list[float] = []
         self._acc_ens_history:  list[float] = []
 
-    # ── API chiamata da main.py ───────────────────────────────────────────────
-
     def compute_dynamic_weights(
         self,
-        feat_tgt: torch.Tensor,   # [B, D]  feature del batch target
-        feat_s1:  torch.Tensor,   # [B, D] o [D]  feature/centroide S1
-        feat_s2:  torch.Tensor,   # [B, D] o [D]  feature/centroide S2
+        feat_tgt: torch.Tensor,
+        feat_s1:  torch.Tensor,
+        feat_s2:  torch.Tensor,
     ) -> tuple[float, float]:
-        """
-        Calcola (w1, w2) via cosine similarity.
-        Accetta sia batch [B,D] che centroidi [D] per S1/S2.
-        """
-        c1 = feat_s1.mean(dim=0) if feat_s1.dim() == 2 else feat_s1
-        c2 = feat_s2.mean(dim=0) if feat_s2.dim() == 2 else feat_s2
-        tgt = feat_tgt if feat_tgt.dim() == 2 else feat_tgt.unsqueeze(0)
-
         with torch.no_grad():
+            c1 = feat_s1.mean(dim=0).detach() if feat_s1.dim() == 2 else feat_s1.detach()
+            c2 = feat_s2.mean(dim=0).detach() if feat_s2.dim() == 2 else feat_s2.detach()
+            tgt = feat_tgt.detach() if feat_tgt.dim() == 2 else feat_tgt.unsqueeze(0).detach()
+
             w1, w2 = self._weighter(tgt, c1, c2)
         return w1.item(), w2.item()
 
@@ -243,10 +191,6 @@ class DynamicEvaluationStrategist:
         loss_dict: dict[str, float] | None = None,
         entropy:   float | None = None,
     ):
-        """
-        Accumula le metriche di un singolo batch.
-        Chiamata una volta per batch dentro evaluate_target() di main.py.
-        """
         self._pending_w1.append(w1)
         self._pending_w2.append(w2)
         if entropy is not None:
@@ -261,54 +205,34 @@ class DynamicEvaluationStrategist:
         acc_head: float,
         acc_ens:  float,
     ):
-        """
-        Chiude l'epoca corrente nel logger con l'accuracy appena calcolata.
-        Chiamata una volta per epoca in main.py dopo aver iterato eval_loader.
-        """
-        # Aggrega i pending di questo epoch in un unico log_batch
         mean_w1  = sum(self._pending_w1)  / len(self._pending_w1)  if self._pending_w1  else 0.5
         mean_w2  = sum(self._pending_w2)  / len(self._pending_w2)  if self._pending_w2  else 0.5
         mean_ent = sum(self._pending_ent) / len(self._pending_ent) if self._pending_ent else math.nan
         loss_agg = {k: sum(v) / len(v) for k, v in self._pending_losses.items()}
 
-        self._logger.log_batch(w1=mean_w1, w2=mean_w2,
-                               loss_dict=loss_agg, entropy=mean_ent)
+        self._logger.log_batch(w1=mean_w1, w2=mean_w2, loss_dict=loss_agg, entropy=mean_ent)
         self._logger.end_epoch(target_acc=acc_head, epoch=epoch)
         self._logger.print_last()
 
         self._acc_head_history.append(acc_head)
         self._acc_ens_history.append(acc_ens)
 
-        # Reset accumulatori per prossima epoch
         self._pending_w1.clear()
         self._pending_w2.clear()
         self._pending_ent.clear()
         self._pending_losses.clear()
 
-    # ── Output ────────────────────────────────────────────────────────────────
-
     def generate_plots(self, output_dir: str | None = None):
-        """
-        Salva le 4 curve di training (accuracy, weighting, loss, entropy)
-        più il confronto head vs ensemble in figures/.
-        """
-        try:
-            import matplotlib.pyplot as plt
-        except ImportError:
-            print("[DynamicEvaluationStrategist] matplotlib non disponibile, skip plots.")
-            return
-
         out = Path(output_dir) if output_dir else self.output_dir
         out.mkdir(parents=True, exist_ok=True)
         fig_dir = out.parent.parent / "figures"
         fig_dir.mkdir(parents=True, exist_ok=True)
 
-        # 1. Curve di training (4 subplot dal MetricsLogger)
+        # 1. Curve di training
         fig = self._logger.plot()
         path1 = fig_dir / f"training_curves_{self.run_name}.png"
         fig.savefig(path1, dpi=150, bbox_inches="tight")
-        plt.close(fig)
-        print(f"[DynamicEvaluationStrategist] Plot salvato → {path1}")
+        plt.close(fig) 
 
         # 2. Head vs Ensemble accuracy
         if self._acc_head_history and self._acc_ens_history:
@@ -323,7 +247,6 @@ class DynamicEvaluationStrategist:
             path2 = fig_dir / f"head_vs_ensemble_{self.run_name}.png"
             fig2.savefig(path2, dpi=150, bbox_inches="tight")
             plt.close(fig2)
-            print(f"[DynamicEvaluationStrategist] Plot salvato → {path2}")
 
         # 3. Source weighting stackplot standalone
         if self._logger.epochs:
@@ -341,12 +264,8 @@ class DynamicEvaluationStrategist:
             path3 = fig_dir / f"source_weighting_{self.run_name}.png"
             fig3.savefig(path3, dpi=150, bbox_inches="tight")
             plt.close(fig3)
-            print(f"[DynamicEvaluationStrategist] Plot salvato → {path3}")
 
     def generate_markdown_report(self, output_dir: str | None = None):
-        """
-        Scrive un report .md con tabella comparativa e statistiche finali.
-        """
         out = Path(output_dir) if output_dir else self.output_dir
         out.mkdir(parents=True, exist_ok=True)
         path = out / f"report_{self.run_name}.md"
@@ -360,7 +279,6 @@ class DynamicEvaluationStrategist:
         mean_w2   = sum(lg.influence_s2) / len(lg.influence_s2) if lg.influence_s2 else 0.5
         n_epochs  = len(lg.epochs)
 
-        # Tabella plain-text per confronto
         table_txt = comparative_table({self.run_name: lg})
 
         lines = [
@@ -418,8 +336,6 @@ class DynamicEvaluationStrategist:
 
         path.write_text("\n".join(lines), encoding="utf-8")
         print(f"[DynamicEvaluationStrategist] Report salvato → {path}")
-
-    # ── Accesso diretto al logger (per uso avanzato / notebook) ──────────────
 
     @property
     def logger(self) -> MetricsLogger:
