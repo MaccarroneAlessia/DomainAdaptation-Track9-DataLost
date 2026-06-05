@@ -112,8 +112,9 @@ class VideoEncoder(nn.Module):
         # no data leak
         elif model_type == "r2plus1d_34_ig65m":
             print("Caricamento R(2+1)D_34 preaddestrato su IG-65M (Puro, No Kinetics) via PyTorch Hub...")
-            # Usa torch.hub per scaricare r2plus1d_34_clip8_ig65m_from_scratch-9bae36ae.pth automaticamente
-            self.backbone = torch.hub.load("moabitcoin/ig65m-pytorch", "r2plus1d_34_8_ig65m", num_classes=359, pretrained=pretrained)
+            # torch.hub per scaricare r2plus1d_34_clip8_ig65m_from_scratch-9bae36ae.pth automaticamente
+            self.backbone = torch.hub.load('moabitcoin/ig65m-pytorch', 'r2plus1d_34_8_ig65m', num_classes=487, pretrained=pretrained, trust_repo=True)
+            raw_dim = self.backbone.fc.in_features
             self.backbone.fc = nn.Identity()
         elif model_type == "handcrafted":
             print("Inizializzazione della rete Handcrafted3DCNN from scratch (no pretraining)...")
@@ -221,9 +222,13 @@ class VideoEncoder(nn.Module):
             x = x.permute(0, 2, 1, 3, 4).contiguous()
         
         # I Transformers (MViT/Swin3D) tipicamente richiedono/performano meglio con input spaziale 224x224.
-        # Effettuiamo un'interpolazione al volo se necessario.
+        # Interpolazione condizionale per architetture che necessitano di risoluzioni maggiori
         if self.model_type in ["mvit", "swin3d"] and x.shape[-1] < 224:
             x = F.interpolate(x, size=(x.shape[2], 224, 224), mode='trilinear', align_corners=False)
+        elif getattr(self, "model_type", None) == "x3d_s" and x.shape[-1] < 160:
+            # X3D_S crasha con input 112x112 perché le pooling interne riducono la risoluzione a 4x4,
+            # ma il layer finale ha un kernel 5x5. Interpoliamo a 160x160 (che è il suo default).
+            x = F.interpolate(x, size=(x.shape[2], 160, 160), mode='trilinear', align_corners=False)
         
         # Gestione speciale per Transformer 2D su ImageNet (No Kinetics)
         if getattr(self, "is_2d_transformer", False):
