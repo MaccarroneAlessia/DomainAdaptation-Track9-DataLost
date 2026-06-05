@@ -1,26 +1,23 @@
 """
-evaluation/
-===========
-Persona 3 — Weighting & Evaluation Strategist
-
-Public API:
-    from evaluation.weighting import CosineWeighter, AttentionWeighter, CentroidTracker
-    from evaluation.metrics   import MetricsLogger, compute_entropy, compute_accuracy, comparative_table
-    from evaluation.evaluator import Evaluator, DynamicEvaluationStrategist
+evaluation package — Dynamic Source Weighting & Evaluation
 """
 
 from evaluation.weighting import CosineWeighter, AttentionWeighter, CentroidTracker
-from evaluation.metrics   import MetricsLogger, compute_entropy, compute_accuracy, comparative_table
-from evaluation.evaluator import Evaluator, DynamicEvaluationStrategist
+from evaluation.metrics import MetricsLogger, compute_entropy, compute_accuracy, comparative_table
+from evaluation.evaluator import FastEvaluator, DynamicEvaluationStrategist
+
+# Alias per compatibilità con codice esistente
+Evaluator = FastEvaluator
 
 __all__ = [
     "CosineWeighter",
-    "AttentionWeighter",
+    "AttentionWeighter", 
     "CentroidTracker",
     "MetricsLogger",
+    "Evaluator",
+    "FastEvaluator",
+    "DynamicEvaluationStrategist",
     "compute_entropy",
     "compute_accuracy",
     "comparative_table",
-    "Evaluator",
-    "DynamicEvaluationStrategist",
 ]

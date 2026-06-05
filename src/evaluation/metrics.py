@@ -9,15 +9,11 @@ from typing import Any
 import torch
 
 
-# ──────────────────────────────────────────────────────────────────────────────
-# Helpers
-# ──────────────────────────────────────────────────────────────────────────────
-
 def compute_entropy(logits: torch.Tensor) -> float:
     """Mean Shannon entropy of a batch of logits."""
     with torch.no_grad():
         probs = logits.softmax(dim=-1).clamp(min=1e-9)
-        entropy = -(probs * probs.log()).sum(dim=-1)  # [B]
+        entropy = -(probs * probs.log()).sum(dim=-1)
         return entropy.mean().item()
 
 
@@ -28,10 +24,6 @@ def compute_accuracy(logits: torch.Tensor, labels: torch.Tensor) -> float:
         return (preds == labels).float().mean().item() * 100.0
 
 
-# ──────────────────────────────────────────────────────────────────────────────
-# MetricsLogger
-# ──────────────────────────────────────────────────────────────────────────────
-
 class MetricsLogger:
     """Accumulates batch-level statistics and aggregates them at epoch boundaries."""
 
@@ -41,7 +33,6 @@ class MetricsLogger:
         self.run_name = run_name
         self._reset_accumulators()
 
-        # Per-epoch history
         self.epochs:         list[int]   = []
         self.target_acc:     list[float] = []
         self.influence_s1:   list[float] = []
@@ -76,7 +67,6 @@ class MetricsLogger:
         self.epochs.append(ep)
         self.target_acc.append(float(target_acc))
 
-        # Source influence
         if self._acc_w1:
             self.influence_s1.append(sum(self._acc_w1) / len(self._acc_w1))
             self.influence_s2.append(sum(self._acc_w2) / len(self._acc_w2))
@@ -84,18 +74,15 @@ class MetricsLogger:
             self.influence_s1.append(0.5)
             self.influence_s2.append(0.5)
 
-        # Losses
         for k in self._LOSS_KEYS:
             vals = self._acc_losses[k]
             self.losses[k].append(sum(vals) / len(vals) if vals else 0.0)
 
-        # Entropy
         self.entropy_tgt.append(
             sum(self._acc_entropy) / len(self._acc_entropy)
             if self._acc_entropy else math.nan
         )
 
-        # Timing
         now = time.time()
         self.epoch_duration.append(now - self._epoch_start)
         self._epoch_start = now
@@ -164,7 +151,10 @@ class MetricsLogger:
         except ImportError:
             raise ImportError("matplotlib is required for plotting. pip install matplotlib")
 
-        # Reset preventivo della memoria grafica per evitare blocchi a fine epoca
+        if not self.epochs:
+            print("[MetricsLogger] Nessun dato da plottare")
+            return None
+
         plt.clf()
         plt.close('all')
 
@@ -174,7 +164,6 @@ class MetricsLogger:
 
         ep = self.epochs
 
-        # 1 — Target accuracy
         ax1 = fig.add_subplot(gs[0, 0])
         ax1.plot(ep, self.target_acc, color="#2196F3", linewidth=2, marker="o", ms=4)
         ax1.set_title("Target Accuracy (head_tgt)")
@@ -187,7 +176,6 @@ class MetricsLogger:
                         label=f"Best @ ep {best_ep}")
             ax1.legend(fontsize=8)
 
-        # 2 — Source influence
         ax2 = fig.add_subplot(gs[0, 1])
         ax2.stackplot(ep, self.influence_s1, self.influence_s2,
                       labels=["Source 1 (HMDB)", "Source 2 (UCF)"],
@@ -199,7 +187,6 @@ class MetricsLogger:
         ax2.legend(fontsize=8, loc="upper right")
         ax2.grid(True, alpha=0.3)
 
-        # 3 — Loss components
         ax3 = fig.add_subplot(gs[1, 0])
         loss_styles = {
             "total":   ("#212121", "-",  2.5),
@@ -211,7 +198,7 @@ class MetricsLogger:
         }
         for key, (color, ls, lw) in loss_styles.items():
             vals = self.losses.get(key, [])
-            if any(v != 0.0 for v in vals):
+            if vals and any(v != 0.0 for v in vals):
                 ax3.plot(ep, vals, color=color, linestyle=ls, linewidth=lw, label=key)
         ax3.set_title("Loss Components")
         ax3.set_xlabel("Epoch")
@@ -219,7 +206,6 @@ class MetricsLogger:
         ax3.legend(fontsize=7, ncol=2)
         ax3.grid(True, alpha=0.3)
 
-        # 4 — Entropy
         ax4 = fig.add_subplot(gs[1, 1])
         valid_ent = [(e, h) for e, h in zip(ep, self.entropy_tgt) if not math.isnan(h)]
         if valid_ent:
@@ -232,10 +218,6 @@ class MetricsLogger:
 
         return fig
 
-
-# ──────────────────────────────────────────────────────────────────────────────
-# Comparative Report
-# ──────────────────────────────────────────────────────────────────────────────
 
 def comparative_table(
     runs: dict[str, "MetricsLogger"],
@@ -267,7 +249,6 @@ def comparative_table(
         lines += [r"\bottomrule", r"\end{tabular}"]
         return "\n".join(lines)
 
-    # Plain text
     col_w = [max(len(h), max((len(r[i]) for r in rows), default=0))
              for i, h in enumerate(headers)]
     sep = "+-" + "-+-".join("-" * w for w in col_w) + "-+"
