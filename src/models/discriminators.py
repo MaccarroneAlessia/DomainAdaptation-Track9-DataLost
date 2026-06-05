@@ -7,16 +7,15 @@ from torch.autograd import Function
 class GRLFunction(Function): # torch.autograd.Function
     @staticmethod
     def forward(ctx, x, alpha):
-        ctx.save_for_backward(torch.tensor(alpha))
-        # save_for_backward per i tensori più robusto 
+        ctx.alpha = alpha  # Memorizzazione sicura senza creare tensori spuri
         return x.view_as(x)
 
     @staticmethod
     def backward(ctx, grad_output):
         # Inverte il gradiente durante la backpropagation
-        # neg() * alpha → il discriminatore "spinge" l'encoder
+        # neg() * alpha -> il discriminatore "spinge" l'encoder
         # verso feature domain-invarianti
-        output = grad_output.neg() * ctx.saved_tensors[0].item()
+        output = grad_output.neg() * ctx.alpha
         return output, None
         # None per alpha, che non è un tensore e non ha gradiente
 
@@ -24,7 +23,7 @@ class GRLFunction(Function): # torch.autograd.Function
 class GRL(nn.Module):
     """
     Wrapper Module del GRL, con alpha schedulabile durante il training.
-    Utile per la strategia progressiva: alpha cresce da 0 → 1 nelle prime epoche.
+    Utile per la strategia progressiva: alpha cresce da 0 -> 1 nelle prime epoche.
     """
     def __init__(self, alpha: float = 1.0):
         super().__init__()
@@ -32,7 +31,6 @@ class GRL(nn.Module):
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         return GRLFunction.apply(x, self.alpha)
-    
 
 class DomainDiscriminator(nn.Module):
     """
@@ -51,6 +49,7 @@ class DomainDiscriminator(nn.Module):
 
         self.net = nn.Sequential(
             nn.Linear(input_dim, 256),
+            nn.BatchNorm1d(256), # Aggiunto per stabilità con GRL oscillanti
             nn.ReLU(),
             self.dropout,
             nn.Linear(256, num_domains)
@@ -64,7 +63,7 @@ class DomainDiscriminator(nn.Module):
         """Permette al trainer di schedulare dinamicamente il dropout."""
         self.dropout.p = p
 
-    def forward(self, x: torch.Tensor):
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
         # Passaggio attraverso il Gradient Reversal Layer
         # alpha non deve essere un parametro di forward
         x = self.grl(x)

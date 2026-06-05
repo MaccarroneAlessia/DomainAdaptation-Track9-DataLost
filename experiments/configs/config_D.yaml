@@ -1,0 +1,7 @@
+# Config D: Video Transformers + DANN
+# Utilizziamo un MViT_V1_B preaddestrato con Dropout extra e Resizing a 224x224.
+# I Transformers hanno un forte rischio di overfitting in UDA, l'ottimizzazione
+# li rende più adatti all'adattamento di dominio con pochi dati.
+model:
+  encoder: "mvit"
+  pretrained: true

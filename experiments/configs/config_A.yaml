@@ -1,0 +1,6 @@
+# Config A: Handcrafted + DANN
+# Encoder addestrato from scratch. Nessun dato target usato in training supervisonato.
+# Confronto onesto tra source-only e DA.
+model:
+  encoder: "handcrafted"
+  pretrained: false

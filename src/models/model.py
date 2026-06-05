@@ -1,3 +1,4 @@
+# src/models/model.py
 import os
 import csv
 import torch
@@ -7,11 +8,11 @@ import torch.nn.functional as F
 try:
     from .backbone import VideoEncoder
     from .discriminators import DomainDiscriminator
-    from .heads import make_head, make_classifier
+    from .heads import make_classifier
 except ImportError:
     from backbone import VideoEncoder
     from discriminators import DomainDiscriminator
-    from heads import make_head, make_classifier
+    from heads import make_classifier
 
 def load_overlap_matrix(csv_path: str, num_src: int, num_tgt: int) -> torch.Tensor:
     """
@@ -25,7 +26,6 @@ def load_overlap_matrix(csv_path: str, num_src: int, num_tgt: int) -> torch.Tens
     if not os.path.exists(csv_path):
         # Fallback uniforme per test fittizi o in assenza di file
         return torch.ones(num_src, num_tgt) / num_tgt
-    
     try:
         matrix = []
         with open(csv_path, 'r', newline='') as f:
@@ -62,7 +62,7 @@ class MultiSourceDANN(nn.Module):
                        │ feat (B, 512)
        ┌───────────────┼─────────────────┐
        │               │                 │
-    head_s1         head_s2         head_tgt   GRL → DomainDiscriminator
+    head_s1         head_s2         head_tgt   GRL -> DomainDiscriminator
     (51 cls)        (5 cls)         (400 cls)      (3 domini: S1, S2, Target)
     
     -> usare due dataset sorgente (HMDB-51 e UCF-101) 
@@ -85,56 +85,38 @@ class MultiSourceDANN(nn.Module):
             num_classes_s1: int = 51, 
             num_classes_s2: int = 5, 
             num_classes_tgt: int = 400, 
-            pretrained: bool = True, 
+            pretrained: bool = False, 
             backbone_type: str = "r3d_18",
             temperature: float = 0.1,
-            ema_momentum: float = 0.9
+            ema_momentum: float = 0.9,
+            dropout: float = 0.5
     ):
         super().__init__()
         self.temperature = temperature
         self.ema_momentum = ema_momentum
-
+        
 
         # 1: Shared Feature Encoder (La CNN che estrae le feature video)
         # encoder (R3D-18 o R(2+1)D-18) -> feature vector da 512-dim per tutti e 3 i domini.
         self.encoder = VideoEncoder(pretrained=pretrained, model_type=backbone_type)
-        dim = self.encoder.out_dim  # 512 attributo pubblico
+        dim = self.encoder.out_dim  # 512
         
-        self.num_classes_s1 = num_classes_s1
-        self.num_classes_s2 = num_classes_s2
-        self.num_classes_tgt = num_classes_tgt
-
-        # 2: Teste di classificazione source-specific e Target Classifiers
-        # Due MLP indipendenti per le sorgenti; una combinata per il target
-        self.head_s1  = make_classifier(dim, num_classes_s1) # HMDB (51 classi)
-        self.head_s2  = make_classifier(dim, num_classes_s2) # CF (5 classi)
-        self.head_tgt = make_classifier(dim, num_classes_tgt) # Kinetics (400 classi)
+        self.head_s1  = make_classifier(dim, num_classes_s1, dropout=dropout)
+        self.head_s2  = make_classifier(dim, num_classes_s2, dropout=dropout)
+        self.head_tgt = make_classifier(dim, num_classes_tgt, dropout=dropout)
         
-        # 3: Domain Discriminators e Gradient Reversal Layer (GRL)
-        # num_domains=3: distingue S1 (0), S2 (1), Target (2)
-
-        # Il discriminatore cercherà di capire da quale dei 3 dataset proviene il video
-        # Il Gradient Reversal Layer (dentro DomainDiscriminator) "imbroglierà" il discriminatore
-        # invertendo i gradienti durante la backpropagation. (trucco della Domain Adaptation)
-        # -> classifica il dominio e capovolge automaticamente il gradiente durante la backpropagation
         self.discriminator = DomainDiscriminator(input_dim=dim, num_domains=3)
         
-        # 4. Centroidi EMA per l'ensemble dinamico
-        # centroidi per calcolare la similarità tra i domini in tempo reale
-        # register_buffer → parte dello state_dict ma non parametri addestrabili
+        # Registrazione Buffer di Stato per i Centroidi
         self.register_buffer("s1_centroid", torch.zeros(dim))
         self.register_buffer("s2_centroid", torch.zeros(dim))
         self.register_buffer("s1_centroid_initialized", torch.tensor(False))
         self.register_buffer("s2_centroid_initialized", torch.tensor(False))
         
-        # 5. Matrici di overlap semantico
-        # Caricamento delle matrici di similarità semantica per proiettare le classi sorgente sul target
+        # Caricamento Matrici Semantiche
         base = os.path.join(os.path.dirname(__file__), "..", "datasets", "label_analysis_output")
-        m1_path = os.path.join(base, "overlap_hmdb_kinetics.csv")
-        m2_path = os.path.join(base, "overlap_ucf_kinetics.csv")
-        
-        self.register_buffer("M1", load_overlap_matrix(m1_path, num_classes_s1, num_classes_tgt))
-        self.register_buffer("M2", load_overlap_matrix(m2_path, num_classes_s2, num_classes_tgt))
+        self.register_buffer("M1", load_overlap_matrix(os.path.join(base, "overlap_hmdb_kinetics.csv"), num_classes_s1, num_classes_tgt))
+        self.register_buffer("M2", load_overlap_matrix(os.path.join(base, "overlap_ucf_kinetics.csv"), num_classes_s2, num_classes_tgt))
 
     def set_grl_alpha(self, alpha: float):
         """Aggiorna il peso (alpha) del GRL per rendere l'adattamento progressivo 0->1."""
@@ -186,7 +168,6 @@ class MultiSourceDANN(nn.Module):
 
         return w1 * proj_s1 + w2 * proj_s2                            # (B, 400)
 
-    # 4: Forward Pass Completo
     def forward(self, x: torch.Tensor, domain: int = 2):
         """
         Forward pass della rete. Accetta il tensore video e l'etichetta del dominio.

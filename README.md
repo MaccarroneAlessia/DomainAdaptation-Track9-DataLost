@@ -35,7 +35,6 @@ conda activate dl-project
 Explain in 2 lines where to download the data from and in which folder it needs to reside (e.g., `data/raw/`).
 
 ### 2. Network Training
-Provide the **exact commands** to start the training.
 
 **Baseline Training:**
 ```bash
@@ -43,8 +42,27 @@ python -m src.training.train --config experiments/configs/baseline.yaml
 ```
 
 **Improved Model Training:**
+
 ```bash
 python -m src.training.train --config experiments/configs/model_v1.yaml
+```
+
+
+Di seguito i comandi per eseguire il training tramite il `main.py` utilizzando le tre configurazioni (A, B e C) previste.
+
+**Configurazione A:**
+```bash
+python src/main.py --config experiments/configs/config_A.yaml
+```
+
+**Configurazione B:**
+```bash
+python src/main.py --config experiments/configs/config_B.yaml
+```
+
+**Configurazione C:**
+```bash
+python src/main.py --config experiments/configs/config_C.yaml
 ```
 
 ### 3. Evaluation

@@ -1,0 +1,6 @@
+# Config C: MC3/S3D from scratch + DANN
+# Encoder più leggero di R3D-18, addestrato from scratch su HMDB+UCF.
+# Nessun data leak.
+model:
+  encoder: "mc3_18"
+  pretrained: false

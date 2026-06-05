@@ -1,0 +1,12 @@
+# Config B: R(2+1)D Kinetics + freeze
+# I pesi dell'encoder sono pre-addestrati su Kinetics-400 (data leak).
+# Presentato come upper bound tecnico.
+model:
+  encoder: "r2plus1d_18"
+  pretrained: true
+
+
+# encoder pre-addestrato su Kinetics-400 (Target)
+# utilizzare un backbone pre-addestrato sul target distrugge la validità della Domain Adaptation (diventa un transfer learning supervisionato mascherato)
+
+# Va documentato  esplicitamente nel report come Upper Bound Tecnico 

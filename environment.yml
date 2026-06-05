@@ -23,5 +23,6 @@ dependencies:
       # Add other pip-only packages here
       - wandb
       - pytorch_lightning
+      - pytorchvideo
 
       # pip install --user nel container

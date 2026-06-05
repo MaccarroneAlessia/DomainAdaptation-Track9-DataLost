@@ -3,8 +3,6 @@
 # Nota: il termine pseudo-label target viene aggiunto in trainer.py.
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
-
 
 class MultiSourceLoss(nn.Module):
     """
@@ -16,31 +14,8 @@ class MultiSourceLoss(nn.Module):
     def __init__(self, lambda_adv: float = 0.1):
         super().__init__()
         self.lambda_adv = lambda_adv
+        # label_smoothing=0.1 eccezionale per evitare l'overfitting delle teste sui piccoli dataset
         self.ce = nn.CrossEntropyLoss(label_smoothing=0.1)
-
-    def classification_loss(
-        self,
-        logits_s1: torch.Tensor = None, labels_s1: torch.Tensor = None,
-        logits_s2: torch.Tensor = None, labels_s2: torch.Tensor = None,
-    ) -> torch.Tensor:
-        """Supervisione sui due domini sorgente."""
-        loss = 0.0
-        if logits_s1 is not None and labels_s1 is not None:
-            loss = loss + self.ce(logits_s1, labels_s1)
-        if logits_s2 is not None and labels_s2 is not None:
-            loss = loss + self.ce(logits_s2, labels_s2)
-        return loss
-
-    def adversarial_loss(
-        self,
-        dom_logits: torch.Tensor,  # (B*3, 3) — tutti i domini concatenati
-        dom_labels: torch.Tensor,  # (B*3,)
-    ) -> torch.Tensor:
-        """
-        Il GRL fa già il lavoro dell'inversione durante la backprop.
-        Qui la loss è una normale CrossEntropy sul discriminatore.
-        """
-        return self.ce(dom_logits, dom_labels)
 
     def forward(
         self,
@@ -50,18 +25,29 @@ class MultiSourceLoss(nn.Module):
         logits_s2: torch.Tensor = None, labels_s2: torch.Tensor = None,
     ) -> dict:
         device = dom_logits.device
-        loss_s1 = self.ce(logits_s1, labels_s1) if logits_s1 is not None else torch.tensor(0.0, device=device)
-        loss_s2 = self.ce(logits_s2, labels_s2) if logits_s2 is not None else torch.tensor(0.0, device=device)
+        
+        # Calcolo condizionale sicuro (Previene i crash mid-epoch causati dalla simulazione incompleta)
+        loss_s1 = self.ce(logits_s1, labels_s1) if logits_s1 is not None and labels_s1 is not None else torch.tensor(0.0, device=device)
+        loss_s2 = self.ce(logits_s2, labels_s2) if logits_s2 is not None and labels_s2 is not None else torch.tensor(0.0, device=device)
         
         L_cls = loss_s1 + loss_s2
-        L_adv = self.adversarial_loss(dom_logits, dom_labels)
+        L_adv = self.ce(dom_logits, dom_labels)
         L_tot = L_cls + self.lambda_adv * L_adv
 
-        # Restituisce dizionario → utile per il logging con W&B / tensorboard
+        # Tracciamento sicuro dei contributi numerici delle sorgenti
+        s1_val = loss_s1.item()
+        s2_val = loss_s2.item()
+        sum_val = s1_val + s2_val
+        
+        inf_s1 = s1_val / sum_val if sum_val > 0 else 0.5
+        inf_s2 = s2_val / sum_val if sum_val > 0 else 0.5
+
         return {
             "loss_total": L_tot,
             "loss_cls":   L_cls,
             "loss_adv":   L_adv,
-            "loss_cls_s1":  loss_s1.item(),
-            "loss_cls_s2":  loss_s2.item(),
+            "loss_cls_s1": s1_val,
+            "loss_cls_s2": s2_val,
+            "influence_ratio_s1": inf_s1,
+            "influence_ratio_s2": inf_s2
         }

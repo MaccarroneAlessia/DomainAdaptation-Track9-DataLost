@@ -41,6 +41,8 @@ class Trainer:
         source2_enabled: bool = True,
         patience: int = 7,  # EARLY STOPPING: max epoche senza miglioramenti
         lambda_pseudo: float = 0.1,
+        warmup_epochs: int = 5,
+        lambda_em: float = 0.1,
         disable_early_stopping_if_mock: bool = False,  # True solo con dati mock (main --mock)
     ):
         self.model = model
@@ -53,6 +55,8 @@ class Trainer:
         self.source2_enabled = source2_enabled
         self.patience = patience
         self.lambda_pseudo = lambda_pseudo
+        self.warmup_epochs = warmup_epochs
+        self.lambda_em = lambda_em
         self.disable_early_stopping_if_mock = disable_early_stopping_if_mock
         self.epochs_without_improvement = 0
         
@@ -61,13 +65,30 @@ class Trainer:
         self._global_step = 0  # contatore globale per W&B
         # Miglior accuratezza sul target per salvare il checkpoint ottimale
         self.best_tgt_acc = -1.0
+        
+        # LR Scheduler per un decadimento graduale
+        self.scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
+            self.optimizer, 
+            T_max=self.max_epochs, 
+            eta_min=1e-6
+        )
 
     def _schedule_disc_dropout(self, epoch: int) -> None:
-        # dropout alto all'inizio (GRL debole) → scende con le epoche
+        # dropout alto all'inizio (GRL debole) -> scende con le epoche
         frac = epoch / max(self.max_epochs - 1, 1)
         p = max(0.2, 0.5 - 0.3 * frac)
         if hasattr(self.model, "discriminator"):
             self.model.discriminator.set_dropout(p)
+
+    def compute_domain_confusion(self, dom_logits_target: torch.Tensor) -> torch.Tensor:
+        """
+        [WOW STRATEGY] Calcola l'entropia della distribuzione di dominio per i soli campioni target.
+        Un'elevata entropia indica che l'encoder estrae feature indistinguibili (DA efficace).
+        """
+        probs = torch.softmax(dom_logits_target, dim=-1)
+        # Aggiungiamo un piccolo epsilon (1e-6) per evitare il log(0) e stabilizzare il calcolo
+        entropy = -torch.sum(probs * torch.log(probs + 1e-6), dim=-1)
+        return entropy.mean()
 
     # scheduling
     def _compute_alpha(self, epoch: int, step: int, num_steps: int) -> float:
@@ -126,16 +147,16 @@ class Trainer:
         # Salva sempre l'ultimo checkpoint per la fault tolerance
         latest_path = os.path.join(self.checkpoint_dir, "latest_checkpoint.pth")
         torch.save(state, latest_path)
-        print(f"     [SAVE] Checkpoint epoca {epoch+1} salvato → {latest_path}")
+        print(f"     [SAVE] Checkpoint epoca {epoch+1} salvato -> {latest_path}")
 
         if is_best:
             best_path = os.path.join(self.checkpoint_dir, "best_model.pth")
             torch.save(state, best_path)
-            print(f"     [BEST] Nuovo best model salvato → {best_path}  (acc={acc:.2f}%)")
+            print(f"     [BEST] Nuovo best model salvato -> {best_path}  (acc={acc:.2f}%)")
 
     # ─ Singolo step 
 
-    def train_step(self, batch_s1, batch_s2, batch_tgt, alpha: float) -> dict:
+    def train_step(self, batch_s1, batch_s2, batch_tgt, alpha: float, epoch: int) -> dict:
         """
         Esegue un singolo step di training su un triplo di batch.
 
@@ -213,16 +234,27 @@ class Trainer:
             else:
                 w1 = w2 = 0.5
 
-        # 8. Loss pseudo-labeling target (KL tra head_tgt e ensemble semantico)
-        loss_tgt_pseudo = F.kl_div(
-            F.log_softmax(cls_tgt, dim=-1),
-            ensemble_probs.detach(),
-            reduction="batchmean",
-        )
+        # 8. Loss pseudo-labeling target (Hard pseudo-labeling maskata sulla confidence)
+        if epoch >= self.warmup_epochs:
+            confidence, pseudo_labels = ensemble_probs.detach().max(dim=-1)
+            mask = confidence > 0.7
+            if mask.sum() > 0:
+                loss_tgt_pseudo = F.cross_entropy(cls_tgt[mask], pseudo_labels[mask])
+            else:
+                loss_tgt_pseudo = torch.tensor(0.0, device=self.device)
+        else:
+            loss_tgt_pseudo = torch.tensor(0.0, device=self.device)
+
+        # 8b. Entropy Minimization sul target
+        probs_tgt = F.softmax(cls_tgt, dim=-1).clamp(min=1e-8)
+        loss_em = -(probs_tgt * probs_tgt.log()).sum(-1).mean()
+        
+        # Schedule dinamico per lambda_em
+        current_lambda_em = self.lambda_em * min(1.0, max(0.0, epoch - self.warmup_epochs) / 5.0)
 
         # 9. Loss totale
         # La loss avversariale è già scalata dentro loss_dict["loss_total"]
-        loss_total = loss_dict["loss_total"] + self.lambda_pseudo * loss_tgt_pseudo
+        loss_total = loss_dict["loss_total"] + self.lambda_pseudo * loss_tgt_pseudo + current_lambda_em * loss_em
 
         # 10. Backward
         self.optimizer.zero_grad()
@@ -244,7 +276,8 @@ class Trainer:
             "loss_cls_s1":     loss_cls_s1_item,
             "loss_cls_s2":     loss_cls_s2_item,
             "loss_adv":        loss_adv.item(),
-            "loss_tgt_pseudo": loss_tgt_pseudo.item(),
+            "loss_tgt_pseudo": loss_tgt_pseudo.item() if isinstance(loss_tgt_pseudo, torch.Tensor) else loss_tgt_pseudo,
+            "loss_em":         loss_em.item(),
             "influence_s1":    ratio_s1,
             "influence_s2":    ratio_s2,
             "w1":              w1,
@@ -272,7 +305,7 @@ class Trainer:
 
         # Accumulatori
         totals = {k: 0.0 for k in [
-            "loss_total", "loss_cls", "loss_adv", "loss_tgt_pseudo",
+            "loss_total", "loss_cls", "loss_adv", "loss_tgt_pseudo", "loss_em",
             "influence_s1", "influence_s2", "w1", "w2",
             "conf_entropy", "p_as_s1", "p_as_s2", "p_as_tgt",
         ]}
@@ -286,7 +319,7 @@ class Trainer:
 
         for step, (batch_s1, batch_s2, batch_tgt) in pbar:
             alpha = self._compute_alpha(epoch, step, num_steps)
-            metrics = self.train_step(batch_s1, batch_s2, batch_tgt, alpha)
+            metrics = self.train_step(batch_s1, batch_s2, batch_tgt, alpha, epoch)
 
             # Accumula
             for k in totals:
@@ -300,6 +333,8 @@ class Trainer:
                 "step/loss_total":    metrics["loss_total"],
                 "step/loss_cls":      metrics["loss_cls"],
                 "step/loss_adv":      metrics["loss_adv"],
+                "step/loss_tgt_pseudo": metrics["loss_tgt_pseudo"],
+                "step/loss_em":       metrics["loss_em"],
                 "step/influence_s1":  metrics["influence_s1"],
                 "step/influence_s2":  metrics["influence_s2"],
                 "step/conf_entropy":  metrics["conf_entropy"],
@@ -376,7 +411,7 @@ class Trainer:
                         _log()              ← W&B centralizzato
 
         Loop completo di training.
-        Per ogni epoca: train_epoch() → evaluate() → stampa riepilogo
+        Per ogni epoca: train_epoch() -> evaluate() -> stampa riepilogo
         """
         print("\n" + "=" * 50)
         print(f"Inizio training su {self.device}")
@@ -399,14 +434,15 @@ class Trainer:
             print(f"  Loss:      total={train_metrics['loss_total']:.4f} | "
                   f"cls={train_metrics['loss_cls']:.4f} | "
                   f"adv={train_metrics['loss_adv']:.4f} | "
-                  f"tgt_ps={train_metrics['loss_tgt_pseudo']:.4f}")
+                  f"tgt_ps={train_metrics['loss_tgt_pseudo']:.4f} | "
+                  f"em={train_metrics['loss_em']:.4f}")
             print(f"  Influence: S1={train_metrics['influence_s1']:.3f} | "
                   f"S2={train_metrics['influence_s2']:.3f} | "
                   f"ratio={train_metrics['w1']/(train_metrics['w2']+1e-8):.3f}")
             print(f"  Confusion: entropy={train_metrics['conf_entropy']:.3f} | "
-                  f"→S1={train_metrics['p_as_s1']:.3f} | "
-                  f"→S2={train_metrics['p_as_s2']:.3f} | "
-                  f"→Tgt={train_metrics['p_as_tgt']:.3f}")
+                  f"->S1={train_metrics['p_as_s1']:.3f} | "
+                  f"->S2={train_metrics['p_as_s2']:.3f} | "
+                  f"->Tgt={train_metrics['p_as_tgt']:.3f}")
             print(f"  Drop:      S1 attivo {train_metrics['s1_active_ratio']*100:.0f}% | "
                   f"S2 attivo {train_metrics['s2_active_ratio']*100:.0f}%")
 
@@ -414,9 +450,12 @@ class Trainer:
             self.evaluate(eval_loader, epoch)
             print("-" * 50)
             
-            # Con mock l'acc target resta ~0% → salta early stop se disable_early_stopping_if_mock
+            # Con mock l'acc target resta ~0% -> salta early stop se disable_early_stopping_if_mock
             if self.epochs_without_improvement >= self.patience and not self.disable_early_stopping_if_mock:
                 print(f"\n[EARLY STOPPING] Nessun miglioramento per {self.patience} epoche consecutive. Training interrotto all'epoca {epoch+1}.")
                 break
+                
+            self.scheduler.step()
+            print(f"  LR attuale: {self.scheduler.get_last_lr()[0]:.2e}")
 
         print(f"\nTraining completato. Best acc target: {self.best_tgt_acc:.2f}%")
