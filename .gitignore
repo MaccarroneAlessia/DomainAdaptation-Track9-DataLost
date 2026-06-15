@@ -1,0 +1,12 @@
+﻿__pycache__/
+*.pyc
+data/
+features/
+features_imagenet/
+weights/
+experiments/checkpoints/
+*.pt
+*.pth
+logs/
+.ipynb_checkpoints/
+.DS_Store
