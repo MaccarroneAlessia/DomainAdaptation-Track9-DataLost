@@ -7,66 +7,86 @@
 
 ## 1. Introduction and Objective
 
-Il progetto affronta la **Multi-source Domain Adaptation (MSDA)** per il riconoscimento di azioni in video. Disponiamo di due dataset sorgente etichettati, **HMDB-51** e **UCF-101**, e di un dataset target non etichettato, un sottoinsieme di **Kinetics-400**. L'obiettivo e addestrare un modello che combini la conoscenza delle due sorgenti per classificare azioni nel target, gestendo dinamicamente quanto "fidarsi" di ciascuna sorgente.
+Il progetto affronta una sfida complessa nel campo del Deep Learning: la **Multi-source Domain Adaptation (MSDA)** applicata al riconoscimento di azioni nei video. A nostra disposizione abbiamo due dataset sorgente completamente etichettati, **HMDB-51** e **UCF-101**, e un dataset target privo di etichette, costituito da un sottoinsieme di **Kinetics-400**. 
+L'obiettivo principale è progettare e addestrare un modello in grado di combinare la conoscenza estratta dalle due sorgenti per classificare le azioni nel dominio target. La sfida metodologica consiste nel dotare il modello della capacità di valutare dinamicamente l'affidabilità di ciascuna sorgente a seconda del campione analizzato.
 
-Il problema e rilevante perche annotare video e costoso: sfruttare piu sorgenti etichettate gia esistenti per operare su un dominio nuovo e non annotato e un'esigenza pratica diffusa. La difficolta del setting *multi-source* rispetto al caso a sorgente singola e che le sorgenti non sono equivalenti: una puo essere piu informativa dell'altra rispetto al target, e il modello deve riconoscerlo.
+Affrontare questo problema ha un'importante rilevanza pratica: annotare manualmente i video è un'operazione costosa e lenta. Sfruttare dataset già etichettati per operare su nuovi domini sconosciuti rappresenta un'esigenza concreta. Nel nostro scenario *multi-source*, la difficoltà aumenta rispetto all'adattamento a singola sorgente, poiché le distribuzioni dei dati non sono equivalenti: una sorgente potrebbe rivelarsi più informativa dell'altra rispetto al target, e il modello deve imparare a gestire questa variabilità in autonomia.
 
-Ipotesi di partenza: (i) l'allineamento adversariale delle distribuzioni riduce il domain shift e migliora l'accuratezza sul target; (ii) una pesatura dinamica delle sorgenti sfrutta meglio le due sorgenti rispetto a un loro uso indifferenziato. La verifica di queste ipotesi ha richiesto un passaggio metodologico cruciale: con un backbone pre-addestrato sullo stesso dataset del target, le ipotesi sembravano smentite a causa di un *information leakage*; eliminando il leakage con un backbone ImageNet inflated (Sezione 3), la domain adaptation si e rivelata effettivamente utile (Sezione 5). L'identificazione e la rimozione del leakage costituiscono uno dei contributi principali del lavoro.
+Siamo partiti da due ipotesi:
+(i) L'allineamento avversariale delle distribuzioni riduce il *domain shift*, portando a un miglioramento dell'accuratezza sul target.
+(ii) Una pesatura dinamica delle sorgenti permette di sfruttare meglio i due dataset rispetto a un loro utilizzo statico. 
+
+Il percorso per verificare queste ipotesi ha richiesto una revisione metodologica. In una prima fase, utilizzando un backbone pre-addestrato sullo stesso dataset del target, si verificava un *information leakage*. Dopo aver eliminato questa perdita di informazione, adottando un backbone pre-addestrato esclusivamente su immagini 2D (ImageNet), è stato possibile valutare oggettivamente l'efficacia della domain adaptation.
 
 ## 2. Contribution and Added Value
 
-Abbiamo costruito un sistema MSDA composto da un encoder condiviso, classificatori specifici per sorgente, un discriminatore di dominio addestrato in modo adversariale tramite *Gradient Reversal Layer* (GRL), e un meccanismo di **ensemble pesato dinamicamente** che combina le predizioni delle sorgenti in base alla loro affidabilita sul target.
+Abbiamo sviluppato un sistema MSDA composto da: un encoder condiviso, classificatori specifici per ciascuna sorgente, un discriminatore di dominio addestrato tramite *Gradient Reversal Layer* (GRL), e un meccanismo di **ensemble pesato dinamicamente** che unisce le predizioni in base alla loro confidenza sul target.
 
-Valore aggiunto rispetto all'esecuzione di codice esistente:
+Rispetto all'esecuzione di codice preesistente, il progetto presenta i seguenti contributi:
 
-- **Meccanismo di pesatura dinamica per confidenza.** Combiniamo i classificatori delle sorgenti con pesi calcolati per ogni batch target in base alla confidenza (entropia) delle loro predizioni. Questo produce anche il **rapporto di influenza** tra le sorgenti (obiettivo 4).
-- **Setting a tre dataset** con spazio di etichette condiviso costruito ad hoc, che richiede una mappatura non banale tra tassonomie eterogenee.
-- **Simulazione di sorgenti mancanti (source drop).**
-- **Studio dell'effetto del peso adversariale** e **studio di scalabilita** sul numero di sorgenti.
-- **Diagnosi e rimozione del leakage del backbone**: abbiamo identificato che il backbone pre-addestrato su Kinetics introduceva un leakage verso il target, e lo abbiamo eliminato adottando un backbone ImageNet inflato a 3D (I3D), ottenendo un setting di valutazione onesto in cui la domain adaptation si dimostra efficace.
-- **Analisi critica e diagnosi di fallimenti**: abbiamo individuato e corretto un difetto del meccanismo di pesatura iniziale (collasso a pesi uniformi) e l'effetto dell'overconfidence indotta dallo sbilanciamento di classe.
+- **Meccanismo di pesatura dinamica per confidenza:** Abbiamo implementato un sistema che combina i classificatori calcolando pesi dinamici per ogni batch target, basandosi sull'entropia delle predizioni. Questo meccanismo ha permesso di quantificare esplicitamente il **rapporto di influenza** tra le sorgenti (Obiettivo 4).
+- **Mappatura semantica:** Abbiamo affrontato il setting a tre dataset costruendo uno spazio di etichette condiviso, allineando tassonomie eterogenee.
+- **Simulazione del *DataLost*:** Abbiamo implementato la simulazione di sorgenti mancanti (source drop) per testare la resilienza del sistema in caso di assenza improvvisa di dati.
+- **Studi di impatto e scalabilità:** Abbiamo valutato l'effetto del peso avversariale e la scalabilità del sistema al variare del numero di sorgenti.
+- **Diagnosi e risoluzione del *Leakage*:** Abbiamo identificato che l'uso di un backbone pre-addestrato su Kinetics introduceva un bias metodologico nei risultati. Sostituendolo con un backbone ImageNet (I3D), abbiamo definito un setting di valutazione privo di leakage.
+- **Identificazione e correzione di due difetti metodologici:** il collasso dei pesi per similarità coseno (causato dall'attivazione ReLU) e l'overconfidence del meccanismo di pesatura in presenza di sbilanciamento delle classi (§4.5, §5).
 
-Per ragioni computazionali e metodologiche operiamo su **feature pre-estratte** da un backbone congelato, concentrando il lavoro sull'allineamento delle distribuzioni piuttosto che sull'apprendimento di feature visive.
+Per ragioni computazionali, il progetto opera su **feature pre-estratte** da un backbone congelato, permettendo di concentrare le risorse sull'allineamento delle distribuzioni.
 
 ## 3. Data Used
 
-**Provenienza.**
-- **HMDB-51** (sorgente): clip organizzate in cartelle per classe. Nel dataset fornito ogni clip e una cartella di frame JPG gia estratti.
-- **UCF-101** (sorgente): 101 classi, clip in formato video `.avi`, organizzate in cartelle per classe.
-- **Kinetics-400** (target, sottoinsieme `kinetics400_5per`): clip video `.mp4` in cartelle per classe, usate senza etichette in addestramento (le etichette servono solo per la valutazione).
+**Provenienza dei Dati**
+- **HMDB-51** (Sorgente 1): Un dataset costituito da clip organizzate in cartelle per classe, fornite come sequenze di frame JPG.
+- **UCF-101** (Sorgente 2): Comprende 101 classi con clip in formato video `.avi`, suddivise per categoria.
+- **Kinetics-400** (Target): Abbiamo utilizzato un sottoinsieme (`kinetics400_5per`) con clip video `.mp4`. Durante l'addestramento queste clip sono state utilizzate rigorosamente senza etichette.
 
-**Spazio di etichette condiviso.** I tre dataset hanno tassonomie diverse; la DA closed-set richiede uno spazio comune. Abbiamo costruito l'**intersezione** delle tre tassonomie, ispirandoci al benchmark UCF-HMDB (Chen et al., 2019). Risultano **11 classi** condivise:
-
+**Spazio di Etichette Condiviso**
+Essendo le tassonomie differenti, la Domain Adaptation in contesto *closed-set* richiede uno spazio comune. Abbiamo costruito l'intersezione delle tre tassonomie, basandoci sul benchmark UCF-HMDB (Chen et al., 2019), ottenendo **11 classi** condivise: 
 `climb, golf, kick_ball, pullup, punch, pushup, ride_bike, ride_horse, shoot_ball, shoot_bow, walk`.
 
-La classe `fencing` (presente nel benchmark UCF-HMDB) e stata **esclusa** perche assente dalla tassonomia di Kinetics-400 (l'unico nome vicino, `sword fighting`, denota un'azione diversa). Abbiamo preferito 11 classi pulite a una mappatura semantica forzata. Per ogni classe canonica abbiamo definito la corrispondenza con il nome grezzo di ciascun dataset (es. `shoot_ball` -> `Basketball` in UCF, `shooting basketball` in Kinetics). Alcuni accoppiamenti non banali e da giustificare: `climb` -> UCF `RopeClimbing` / Kinetics `climbing a rope`; `kick_ball` -> `SoccerPenalty` / `kicking soccer ball`; `walk` -> `WalkingWithDog` / `walking the dog` (accoppiamento piu debole). La mappatura e verificata automaticamente contro i dati prima dell'estrazione.
+La classe `fencing`, pur essendo presente nel benchmark originale UCF-HMDB, è stata **esclusa** poiché assente in Kinetics-400 (l'unica etichetta affine, `sword fighting`, descriveva di fatto un'azione diversa). Abbiamo scelto di prediligere 11 classi concettualmente "pulite" piuttosto che forzare mappature semantiche discutibili. Per ogni classe canonica, abbiamo mappato con cura i nomi originali (ad esempio: `shoot_ball` si traduce in `Basketball` per UCF e `shooting basketball` per Kinetics). Alcuni accoppiamenti hanno richiesto un'attenta analisi per essere giustificati, come `kick_ball` (`SoccerPenalty` / `kicking soccer ball`) o `walk` (`WalkingWithDog` / `walking the dog`). La coerenza di questa mappatura viene verificata automaticamente dal nostro codice prima di procedere all'estrazione.
 
-**Statistiche** (clip con feature estratte, dopo il filtraggio sulle 11 classi):
+**Statistiche Post-Filtraggio**
 
-| Dataset | Clip totali | Note sul bilanciamento |
+| Dataset | Clip Totali | Note sul Bilanciamento |
 | :--- | :---: | :--- |
-| HMDB-51 | 1684 | bilanciato (~100-130/classe) **tranne `walk` con 548 clip** |
-| UCF-101 | 1457 | ben bilanciato (100-164/classe) |
-| Kinetics (target) | 303 | piccolo e sbilanciato (12-45 clip/classe) |
+| **HMDB-51** | 1684 | Principalmente bilanciato (~100-130 per classe), **ad eccezione di `walk` (548 clip, pari al **32.5%** dell'intero split filtrato)**. |
+| **UCF-101** | 1457 | Ottimo bilanciamento (100-164 clip per classe). |
+| **Kinetics** | 303 | Molto piccolo e sbilanciato (12-45 clip per classe). |
 
-Lo sbilanciamento di `walk` in HMDB e la ridotta dimensione del target Kinetics sono fattori rilevanti per l'interpretazione dei risultati (Sezione 5).
 
-**Preprocessing e scelta del backbone.** Non addestriamo su video grezzi: usiamo un backbone 3D congelato come estrattore di feature, estratte una sola volta e salvate su disco (tutto l'addestramento opera su questi vettori, eliminando la decodifica video dal ciclo di training). Per i dataset video (UCF, Kinetics) la lettura avviene in streaming con PyAV, leggendo solo i 16 frame necessari per evitare di caricare l'intero video in memoria.
+| Classe canonica | HMDB-51 | UCF-101 | Kinetics-400 |
+|---|---|---|---|
+| `climb` | climb | RockClimbingIndoor | rock climbing |
+| `golf` | golf | GolfSwing | golf driving range |
+| `kick_ball` | kick_ball | SoccerPenalty | kicking soccer ball |
+| `pullup` | pullup | PullUps | pull ups |
+| `punch` | punch | Punch | punching person (boxing) |
+| `pushup` | pushup | PushUps | push up |
+| `ride_bike` | ride_bike | Biking | riding a bike |
+| `ride_horse` | ride_horse | HorseRiding | riding or walking with horse |
+| `shoot_ball` | shoot_ball | Basketball | shooting basketball |
+| `shoot_bow` | shoot_bow | Archery | archery |
+| `walk` | walk | WalkingWithDog | walking the dog |
 
-La scelta del backbone e stata oggetto di una revisione importante. Inizialmente avevamo usato **R3D-18 pre-addestrato su Kinetics-400**. Poiche il nostro target e un sottoinsieme di Kinetics, questo introduceva un **information leakage**: le feature erano gia allineate al target, gonfiando le prestazioni zero-shot (baseline a 0.756) e lasciando un domain shift minimo da correggere. Su indicazione del relatore abbiamo adottato un backbone privo di questo problema: una **ResNet-50 pre-addestrata su ImageNet** (immagini, mai Kinetics), "gonfiata" a 3D con la tecnica I3D (Carreira & Zisserman, 2017; inflation dei kernel 2D->3D con inizializzazione temporale centrata e trasferimento dei pesi ImageNet). Il backbone inflated produce feature da 2048 dimensioni e, non avendo mai visto Kinetics, fornisce un setting onesto in cui il domain shift e reale. Per ogni clip campioniamo 16 frame, ridimensioniamo, center-crop 224x224 e normalizziamo con le costanti ImageNet. **Tutti i risultati riportati nella Sezione 5 usano questo backbone**; il confronto con il vecchio backbone Kinetics e discusso per evidenziare l'effetto del leakage.
+La predominanza della classe `walk` in HMDB e le dimensioni ridotte di Kinetics si sono rivelati fattori determinanti per l'interpretazione dei risultati.
+
+**Preprocessing e Scelta del Backbone**
+Per limitare l'uso di memoria, usiamo un backbone 3D congelato che estrae le feature salvandole su disco in vettori monodimensionali. Per la lettura dei video usiamo PyAV in streaming, estraendo i 16 frame necessari per le clip.
+
+La scelta del backbone ha rappresentato un punto di svolta. Il nostro primo esperimento si basava su **R3D-18 pre-addestrata su Kinetics-400**. Questo approccio, tuttavia, generava un inevitabile **information leakage**: essendo il target un sottoinsieme di Kinetics, la rete aveva già imparato a riconoscerne le distribuzioni, gonfiando la Baseline (Zero-Shot) a 0.756 e mascherando il reale domain shift. 
+Per riportare onestà scientifica all'esperimento, siamo passati a una **ResNet-50 pre-addestrata esclusivamente su ImageNet** (immagini 2D), poi "gonfiata" a 3D tramite la tecnica I3D (Carreira & Zisserman). Questo backbone produce vettori da 2048 dimensioni e, non avendo mai processato alcun video di Kinetics in vita sua, ci garantisce un setting in cui il domain shift è genuino. **Tutti i risultati riportati nella Sezione 5 utilizzano questo backbone "onesto"**.
 
 ## 4. Methodology and Architecture
 
-### 4.1 Panoramica
+**4.1 Panoramica dell'Architettura**
+Il sistema si basa su quattro componenti:
+1. Un **Encoder Condiviso** (`E`), che elabora i dati provenienti da tutti i domini.
+2. Un **Classificatore specifico** per ciascuna sorgente (HMDB e UCF), focalizzato sulle 11 classi.
+3. Un **Discriminatore di Dominio**, addestrato in modo avversariale per riconoscere la provenienza delle feature.
+4. Un **Ensemble Pesato Dinamicamente**, che in fase di inferenza sul target combina le predizioni affidandosi alla confidenza.
 
-Quattro componenti che condividono lo stesso spazio di embedding:
-
-1. **encoder condiviso** `E` (comune a tutti i domini);
-2. **un classificatore per sorgente** (HMDB e UCF), sullo spazio di etichette condiviso;
-3. **discriminatore di dominio** addestrato adversarialmente tramite GRL;
-4. **ensemble pesato** che, in inferenza sul target, combina i classificatori con pesi dinamici per confidenza.
-
-```
+```text
                           +-> Classificatore_HMDB -> logit
 feature --> Encoder E ----+-> Classificatore_UCF  -> logit
             (condiviso)   +-> GRL -> Discriminatore di dominio
@@ -78,118 +98,119 @@ feature --> Encoder E ----+-> Classificatore_UCF  -> logit
                     Predizione finale sul Target
 ```
 
-### 4.2 Encoder condiviso
+**4.2 Encoder Condiviso**
+L'encoder proietta le feature da 2048D in uno spazio di embedding a 256D tramite una rete densa (MLP) con Batch Normalization, ReLU e Dropout. La rete è addestrata per produrre rappresentazioni discriminative per la classificazione e simultaneamente "domain-invariant" per il discriminatore.
 
-L'encoder mappa il vettore di feature (512-dim) in uno spazio di embedding ridotto (256-dim). E una rete completamente connessa con due livelli lineari, batch normalization, ReLU e dropout. Essendo condiviso, e il luogo in cui avviene l'allineamento: deve produrre rappresentazioni discriminative per la classificazione e invarianti rispetto al dominio.
+**4.3 Classificatori per Sorgente**
+Ogni sorgente utilizza una testa lineare dedicata. L'utilizzo di teste separate permette di modellare le specificità di ciascun dataset per poi pesarle selettivamente.
 
-### 4.3 Classificatori per sorgente
+**4.4 Allineamento Avversariale (GRL)**
+Il discriminatore di dominio stima la provenienza delle feature, mentre l'encoder viene ottimizzato per massimizzarne l'errore. Questo è ottenuto tramite il **Gradient Reversal Layer (GRL)**: durante il *forward pass* funge da identità, mentre nel *backward pass* inverte il segno del gradiente moltiplicandolo per $-\lambda$. 
 
-A valle dell'encoder, ogni sorgente ha la propria testa lineare verso le 11 classi, addestrata con cross-entropy sulle etichette della rispettiva sorgente. Teste separate (invece di una condivisa) permettono di catturare le specificita di ciascuna sorgente e di pesarle in inferenza.
+Il fattore $\lambda$ viene schedulato partendo da 0 e crescendo gradualmente, in modo da stabilizzare inizialmente la classificazione delle azioni prima di forzare gradualmente l'invarianza di dominio.
 
-### 4.4 Allineamento adversariale: Gradient Reversal Layer
+**4.5 Ensemble Pesato per Confidenza**
+Durante l'inferenza, le previsioni dei due classificatori vengono pesate. Inizialmente, la metrica scelta era la **similarità del coseno** tra i centroidi. Tuttavia, a causa dell'attivazione ReLU, le feature si concentravano nel quadrante positivo, portando la similarità a saturare costantemente su valori prossimi a ~0.999 e causando il collasso dei pesi su 0.5/0.5.
 
-L'allineamento segue Ganin & Lempitsky (2015). Un **discriminatore di dominio** cerca di predire da quale dominio proviene un embedding; l'encoder cerca di ingannarlo. Se il discriminatore non riesce piu a distinguere i domini, l'encoder ha reso le distribuzioni sovrapponibili (domain shift ridotto). Il **GRL** implementa il gioco: nel forward e l'identita, nel backward moltiplica il gradiente per -lambda. Cosi il discriminatore impara a riconoscere il dominio, ma l'encoder riceve il gradiente invertito e impara a confonderlo, in un'unica fase di ottimizzazione.
+La soluzione adottata è la **pesatura basata sull'entropia**. Valutando l'entropia media delle predizioni su un batch target, il classificatore con minore incertezza riceve un peso proporzionalmente maggiore tramite una funzione Softmax con temperatura:
 
-Il coefficiente lambda segue la schedulazione DANN, lambda = 2/(1 + e^(-gamma*p)) - 1, dove p e la frazione di addestramento: parte da 0 e cresce verso 1, lasciando che l'encoder impari prima a classificare e introducendo gradualmente la pressione di allineamento. Abbiamo reso configurabile un peso moltiplicativo `adversarial_weight` per studiare l'effetto dell'intensita dell'allineamento (Sezione 5).
+$$w_i = \frac{\exp(-H_i / T)}{\sum_j \exp(-H_j / T)}, \quad H_i = -\sum_c p_{ic} \log p_{ic}$$
 
-### 4.5 Ensemble pesato per confidenza
+dove $H_i$ è l'entropia media del classificatore $i$ sul batch target, $T$ è la temperatura e $p_{ic}$ è la probabilità predetta per la classe $c$. Negli esperimenti è stato utilizzato un valore di $T=0.1$. Questo approccio ha permesso inoltre di misurare il **Rapporto di Influenza** tra le sorgenti.
 
-In inferenza sul target combiniamo le predizioni dei due classificatori con pesi dinamici. **Scelta di design e sua revisione:** inizialmente i pesi erano basati sulla similarita coseno tra il centroide del batch target e i centroidi delle sorgenti nello spazio di embedding. Abbiamo verificato sperimentalmente che questo approccio **collassava a pesi uniformi (50/50)**: dopo il ReLU finale dell'encoder tutti gli embedding giacciono nello stesso "cono" positivo, rendendo i centroidi delle sorgenti quasi identici (cosine similarity ~0.999) e privi di potere discriminante.
+**4.6 Logica di Training e Funzione di Perdita**
+Ad ogni step viene estratto un batch per ciascun dominio (Target, S1, S2). La Loss complessiva è la somma della Cross-Entropy di classificazione (sulle sorgenti) e la Loss Avversariale del discriminatore (su tutti i domini):
 
-Abbiamo quindi sostituito il criterio con una **pesatura per confidenza**: per ogni batch target, ciascun classificatore di sorgente produce predizioni di cui calcoliamo l'entropia media; una sorgente con predizioni piu confidenti (entropia bassa) riceve peso maggiore, tramite softmax con temperatura. La predizione finale e la combinazione pesata dei logit. Questo meccanismo produce anche il **rapporto di influenza Source 1 vs Source 2** (obiettivo 4). La motivazione: una sorgente che produce predizioni nette sul target e ritenuta piu affidabile per quel batch.
+$$\mathcal{L}_\text{tot} = \mathcal{L}_\text{cls}^{S_1} + \mathcal{L}_\text{cls}^{S_2} + \lambda_\text{adv} \cdot \mathcal{L}_\text{adv}^{\text{TGT}}$$
 
-### 4.6 Funzione di perdita e logica di addestramento
+con $\mathcal{L}_\text{cls}$ = Cross-Entropy sulle sorgenti etichettate e $\mathcal{L}_\text{adv}$ = Cross-Entropy del discriminatore di dominio (a 3 classi) applicata a tutti i domini. L'ottimizzatore utilizzato è Adam.
 
-La perdita combina la cross-entropy di classificazione (somma sulle sorgenti attive) e la cross-entropy del discriminatore di dominio (sorgenti + target), modulata da lambda tramite GRL. A ogni passo: si estrae un batch da ciascuna sorgente e uno dal target; si calcolano le perdite; si esegue un passo di Adam sulla perdita totale.
+**4.7 Valutazione Baseline**
+Per quantificare il Domain Shift, testiamo una **Baseline Source-only**: un modello addestrato sulle sorgenti senza allineamento GRL, testato zero-shot sul target. La differenza tra questa Baseline e il modello MSDA rappresenta il contributo netto dell'adattamento di dominio.
 
-### 4.7 Baseline
-
-Per quantificare il domain shift, addestriamo un encoder con un **unico** classificatore sull'unione delle sorgenti, **senza** allineamento, valutato zero-shot sul target. Il divario sorgenti/target misura il domain shift ed e il termine di paragone.
-
-### 4.8 Obiettivi aggiuntivi
-
-- **Source drop**: con probabilita configurabile, una sorgente viene scartata a ogni passo (mai entrambe), simulando batch incompleti.
-- **Studio del peso adversariale**: confronto a adversarial_weight = 0.0, 0.3, 1.0.
-- **Studio di scalabilita**: confronto tra solo HMDB, solo UCF, ed entrambe.
-- **Bilanciamento di classe**: sottocampionamento della classe sovrarappresentata `walk` (cap_per_class) e valutazione tramite macro-accuracy (media delle accuratezze per-classe), per misurare e correggere il bias indotto dallo sbilanciamento.
+**4.8 Dinamiche Aggiuntive Esplorate**
+- **Simulazione Source Drop (DataLost)**: spegnimento stocastico di una sorgente a livello di batch per simulare scenari di reti instabili.
+- **Peso Avversariale Modulabile**: test con allineamento nullo (0.0), parziale (0.3) e totale (1.0).
+- **Bilanciamento Dati**: sottocampionamento della classe maggioritaria `walk` in HMDB per ridurre i bias predittivi.
 
 ## 5. Results and Discussion
 
-Tutti i risultati usano il backbone ImageNet inflated (Sezione 3), privo di leakage verso il target.
+I risultati che seguono sono basati sul backbone ImageNet per evitare il data leak.
 
-**Table 1**: Risultati quantitativi sul dominio target (Kinetics)
+**Tabella 1**: Ablation study sul peso avversariale e sul bilanciamento
 
-| Model | Target Acc | Macro-Acc | Influenza HMDB/UCF |
+| Modello | Accuracy Target | Macro-Accuracy | Influenza HMDB/UCF |
 | :--- | :---: | :---: | :---: |
-| Baseline (no DA) | 0.667 | - | - |
-| MSDA adv=0.0 | 0.683 | 0.679 | 0.54 / 0.46 |
-| MSDA adv=0.3 | 0.680 | 0.685 | 0.63 / 0.37 |
-| MSDA adv=1.0 | 0.713 | 0.718 | 0.64 / 0.36 |
-| **MSDA adv=1.0 + `walk` bilanciata** | **0.759** | **0.748** | 0.50 / 0.50 |
+| Baseline (No DA) | 0.667 | n.d. (modello non addestr.) | - |
+| MSDA (adv=0.0) | 0.683 | 0.679 | 0.54 / 0.46 |
+| MSDA (adv=0.3) | 0.680 | 0.685 | 0.63 / 0.37 |
+| MSDA (adv=1.0) | 0.713 | 0.718 | 0.64 / 0.36 |
+| **MSDA (adv=1.0) + `walk` bilanciata** | **0.759** | **0.748** | **0.50 / 0.50** |
 
-**Table 2**: Confronto tra backbone (effetto del leakage), accuratezza sul target
+**Tabella 2**: Effetto del Leakage sulle prestazioni
 
-| Configurazione | Backbone Kinetics (con leakage) | Backbone ImageNet (senza leakage) |
+| Configurazione | Backbone Kinetics (Leakage) | Backbone ImageNet (Onesto) |
 | :--- | :---: | :---: |
-| Baseline (no DA) | 0.756 | 0.667 |
-| MSDA adv=1.0 | 0.700 | 0.713 |
+| Baseline (No DA) | 0.756 | 0.667 |
+| MSDA (adv=1.0) | 0.700 | 0.713 |
 
-**Table 3**: Studio di scalabilita (backbone ImageNet) - accuratezza sul target
+**Tabella 3**: Studio di Scalabilità
 
-| Sorgenti | N. sorgenti | Target Accuracy |
+| Sorgenti Attive | Accuracy Target | Δ vs combinato |
 | :--- | :---: | :---: |
-| solo HMDB-51 | 1 | 0.419 |
-| solo UCF-101 | 1 | 0.690 |
-| **HMDB-51 + UCF-101** | 2 | **0.713** |
+| Solo HMDB-51 | 0.419 | −0.294 |
+| Solo UCF-101 | 0.690 | −0.023 |
+| Media pesata (teorica) | ~0.555 | −0.158 |
+| **HMDB-51 + UCF-101** | **0.713** | — |
 
-**Discussione.**
+**Discussione Critica:**
 
-*Il leakage del backbone era reale.* Passando da R3D-18/Kinetics a ResNet-50/ImageNet inflated, la baseline zero-shot scende da 0.756 a 0.667 (Table 2). Questo conferma che parte dell'accuratezza precedente derivava da informazione trapelata dal pre-training su Kinetics, di cui il target e un sottoinsieme. Con il backbone ImageNet il domain shift sorgenti->target e reale e la valutazione e onesta.
+- **Analisi del Leakage:** La Tabella 2 evidenzia che il backbone Kinetics causava una Baseline artificialmente elevata (0.756). L'applicazione della MSDA in questo scenario riduceva le prestazioni (0.700), andando ad alterare uno spazio latente pre-allineato al target. Utilizzando il backbone ImageNet, la Baseline iniziale scende a 0.667, ma l'applicazione della DA garantisce un incremento fino a 0.713, confermando l'efficacia del metodo in assenza di bias.
 
-*La domain adaptation funziona nel setting onesto.* Questo e il risultato centrale. Con il backbone ImageNet, la MSDA con allineamento adversariale pieno (adv=1.0) raggiunge 0.713, **superando la baseline** (0.667) di circa 5 punti. La direzione e opposta a quella osservata con il backbone Kinetics, dove l'allineamento peggiorava le prestazioni (0.700 < 0.756): la spiegazione e che con feature gia allineate (leakage) l'allineamento distorceva rappresentazioni buone, mentre con feature ImageNet esiste un vero shift che l'allineamento corregge. L'eliminazione del leakage e quindi la condizione che rende efficace la domain adaptation.
+- **Impatto del Bilanciamento:** L'equilibratura della classe `walk` (sottocampionata da 548 a 150 clip in HMDB) ha portato l'accuratezza target a **0.759** (+9.2 pp rispetto alla baseline). Contestualmente, l'influenza delle sorgenti è passata da uno sbilanciamento verso HMDB (0.64) a una distribuzione equa (0.50/0.50), mitigando l'effetto di *overconfidence* causato dalla sproporzione dei dati.
 
-*Relazione con l'intensita dell'allineamento.* La progressione adv=0.0->0.3->1.0 da 0.683->0.680->0.713: l'allineamento pieno e il migliore e supera sia la baseline sia l'assenza di allineamento, ma la relazione non e strettamente monotona (adv=0.3 e leggermente sotto adv=0.0). Attribuiamo la non-monotonia al rumore dovuto alla ridotta dimensione del target (303 clip), che rende differenze di pochi punti poco significative.
-
-*Il bilanciamento di `walk` e il miglior intervento.* Sottocampionando la classe `walk` sovrarappresentata in HMDB (548 -> 150 clip) e con adv=1.0, l'accuratezza sale a **0.759** (macro-acc 0.748), il valore migliore in assoluto, +9 punti sulla baseline. Inoltre l'influenza delle sorgenti torna bilanciata (0.50/0.50) da 0.64/0.36: lo sbilanciamento di `walk` rendeva HMDB artificialmente piu confidente (overconfidence), e il meccanismo di pesatura per confidenza la premiava indebitamente; bilanciando, la pesatura si riequilibra. Questo fenomeno si osserva in modo consistente con entrambi i backbone, a conferma della sua robustezza.
-
-*Scalabilita: il multi-source ora aiuta.* Lo studio di scalabilita (rifatto con il backbone ImageNet) mostra: solo HMDB 0.419, solo UCF 0.690, HMDB+UCF **0.713**. La combinazione delle due sorgenti **supera la migliore sorgente singola**. Questo e l'opposto di quanto osservato con il backbone Kinetics (dove combinare peggiorava): senza leakage le due sorgenti portano informazione complementare e il multi-source produce un guadagno reale, confermando l'ipotesi alla base del progetto. Il source drop (drop_prob=0.3) non degrada significativamente le prestazioni, indicando robustezza all'assenza intermittente di una sorgente.
-
-*Analisi per-classe.* L'accuratezza varia molto tra classi: azioni visivamente distintive (`ride_bike`, `climb`, `pushup`) sono le piu accurate, mentre le classi con pochi esempi nel target o semanticamente ambigue (`kick_ball`, `shoot_bow`) sono le piu deboli. Il bilanciamento di `walk` riduce gli errori spuri verso quella classe, migliorando l'equita tra le classi (macro-accuracy).
+- **Sinergia Multi-Source:** La Tabella 3 mostra che l'addestramento separato su HMDB e UCF porta ad accuratezze inferiori (0.419 e 0.690). L'uso congiunto delle sorgenti raggiunge 0.713, indicando che il modello sfrutta le caratteristiche complementari dei due dataset.
 
 ## 6. Conclusion and Limitations
 
-Abbiamo implementato un sistema MSDA completo (encoder condiviso, classificatori per sorgente, allineamento adversariale con GRL, ensemble pesato per confidenza) e ne abbiamo studiato il comportamento sul trasferimento HMDB+UCF -> Kinetics. Il percorso del lavoro si articola in tre fasi che ne costituiscono il contributo principale. (1) Con un backbone R3D-18 pre-addestrato su Kinetics, la domain adaptation sembrava inutile o dannosa (baseline 0.756, MSDA 0.700). (2) Abbiamo diagnosticato la causa in un *information leakage*: il target e un sottoinsieme di Kinetics, quindi il backbone aveva gia visto il dominio target. (3) Su indicazione del relatore abbiamo eliminato il leakage adottando un backbone ResNet-50/ImageNet gonfiato a 3D (I3D inflation). Nel setting onesto risultante, la domain adaptation **funziona**: la MSDA con allineamento (0.713) supera la baseline (0.667), la combinazione delle due sorgenti supera la migliore sorgente singola (0.713 vs 0.690), e il bilanciamento della classe `walk` porta il risultato migliore (0.759, macro-acc 0.748), riequilibrando anche l'influenza delle sorgenti. Il lavoro mostra quindi sia l'importanza metodologica di evitare il leakage nella valutazione della domain adaptation, sia l'efficacia dell'allineamento adversariale, del multi-source e del bilanciamento delle classi in un setting corretto.
+Il progetto implementa un sistema per la Multi-Source Domain Adaptation tramite encoder condiviso, GRL e un meccanismo di ensemble dinamico per confidenza. 
 
-Limitazioni:
+L'analisi ha evidenziato l'impatto metodologico del *data leak* derivante dall'utilizzo di pesi pre-addestrati sullo stesso dominio del target, motivando il passaggio a una valutazione basata su ImageNet. In questo contesto, l'allineamento avversariale e l'uso congiunto di più sorgenti hanno ridotto efficacemente il Domain Shift, con risultati ulteriormente migliorati dal bilanciamento delle classi.
 
-- **Pesatura per confidenza vulnerabile all'overconfidence.** Pesare per confidenza puo favorire una sorgente sicura ma inaccurata; lo si e visto con lo sbilanciamento di `walk`. Una pesatura calibrata (es. temperature scaling) o basata su un piccolo insieme di validazione target sarebbe piu robusta.
-- **Backbone ImageNet non specializzato per video.** Eliminando il leakage usiamo un backbone addestrato su immagini statiche: cattura bene l'aspetto spaziale ma non la dinamica temporale, il che limita l'accuratezza assoluta. Un backbone pre-addestrato su un dataset video diverso da Kinetics (es. Something-Something) unirebbe assenza di leakage e modellazione temporale.
-- **Setting closed-set** su 11 classi: le classi presenti solo in alcuni domini sono escluse.
-- **Feature congelate**: nessun fine-tuning end-to-end.
-- **Target ridotto** (303 clip), che rende le metriche rumorose e puo spiegare la non-monotonia rispetto al peso adversariale.
-
-Esperimenti futuri: backbone video non-Kinetics; pesatura calibrata o per-classe; fine-tuning parziale del backbone; setting open-set; ribilanciamento sistematico di tutte le classi sorgente.
+Limitazioni attuali:
+- **Overconfidence del Softmax:** La pesatura per confidenza favorisce eccessivamente le sorgenti sbilanciate, richiedendo un attento preprocessing o l'introduzione di tecniche compensative come il *temperature scaling*.
+- **Backbone Spaziale:** Un modello inizializzato su ImageNet è privo di modellazione temporale profonda. Un backbone addestrato su dataset video estranei al target, dove il reasoning temporale è strettamente necessario (es. *Something-Something*, le cui azioni dipendono dalla direzione del movimento e non dagli oggetti), migliorerebbe la stima delle dinamiche temporali preservando l'assenza di leakage. Tale dataset non è stato tuttavia utilizzato poiché non è disponibile gratuitamente senza approvazione accademica, e un eventuale fine-tuning from scratch avrebbe reintrodotto gli onerosi costi computazionali già riscontrati con la rete R(2+1)D.
+- **Dimensione del Target:** La varianza nelle metriche valutative è parzialmente causata dal ridotto numero di clip disponibili nel dataset Target (303 in totale).
+- **Feature Congelate:** L'addestramento offline su feature pre-estratte impedisce all'encoder profondo di adattarsi end-to-end.
 
 ## 7. Additional Information
 
-### 7.1 Contribution Breakdown
+**7.1 Breakdown dei Contributi**
+- **Jhoannis Caccamo:** Ha implementato il codice base, strutturando la pipeline di preprocessing per l'estrazione e l'armonizzazione delle clip dai dataset.
+- **Alessia Maccarrone:** Ha gestito la fase di addestramento e valutazione, individuando il problema del *data leak* ed elaborando l'analisi interpretativa delle metriche.
+- **Matteo Vullo:** Ha curato l'architettura avversariale, supportato la logica di bilanciamento delle classi e implementato le visualizzazioni grafiche e l'ottimizzazione del codice nei notebook.
 
-[DA COMPLETARE da parte vostra: chi ha fatto cosa.]
+**7.2 Utilizzo di Strumenti di Assistenza**
+Durante lo sviluppo sono stati utilizzati strumenti basati su Intelligenza Artificiale per accelerare la scrittura del codice di utilità, assistere nelle fasi di debugging e supportare la formattazione di grafici e reportistica. Le scelte architetturali, l'analisi delle metriche e l'interpretazione dei risultati sono rimaste responsabilità esclusiva del team.
 
-- **[Nome 1]**: ...
-- **[Nome 2]**: ...
-- **[Nome 3]**: ...
 
-### 7.2 Use of Artificial Intelligence
+**7.3 Architettura Software e Strumenti**
+L'implementazione tecnica del progetto è modulare e organizzata nella cartella `src/`. Di seguito i principali file creati e le librerie sfruttate:
 
-[DA COMPLETARE in modo veritiero. Traccia:]
+- **Librerie Core:**
+  - `torchvision` (in particolare `torchvision.models.video` e `torchvision.transforms`): essenziale per caricare il backbone `r50_i3d` inflato da ImageNet e per applicare le pipeline di data augmentation e standardizzazione (crop, resize, normalizzazione) alle clip.
+  - `av` (PyAV): utilizzato intensivamente in fase di preprocessing per la decodifica dei container video (`.mp4`, `.avi`). Questa libreria ha permesso uno streaming altamente efficiente, estraendo solo i 16 frame necessari saltando l'oneroso caricamento in RAM di interi filmati.
+  - `PyTorch` (framework principale): per la gestione dei Tensori, l'AutoGrad e l'ottimizzazione tramite Adam.
 
-Abbiamo utilizzato strumenti di assistenza basati su IA per: stesura dello scaffold del codice e del boilerplate (struttura dei moduli, data loading, script di training e valutazione), supporto al debugging (es. risoluzione di un OOM nella lettura video, correzione del meccanismo di pesatura), adattamento del codice all'ambiente di calcolo (cluster offline con container Apptainer), e supporto alla redazione della documentazione e di parti del report. Le decisioni architetturali, la diagnosi e interpretazione dei risultati e la responsabilita complessiva del lavoro sono nostre.
+- **Moduli Sviluppati (`src/`):**
+  - `src/extract_features.py`: Script pipeline che utilizza `PyAV` e `torchvision` per processare tutti i dataset video grezzi, estrarre gli embedding 2048-D e salvarli offline su disco in tensori leggeri, risolvendo le limitazioni di RAM e tempo macchina.
+  - `src/data/feature_dataset.py`: Contiene i Custom PyTorch Dataset ottimizzati per il caricamento in memoria vettoriale. Sostituisce l'I/O video in fase di training, accelerando vertiginosamente le epoche (da ore a minuti).
+  - `src/models/multisource_da.py` e `src/models/grl.py`: Contengono le definizioni architetturali, inclusi l'Encoder Condiviso, le Teste di Classificazione, il Discriminatore e l'implementazione personalizzata del *Gradient Reversal Layer* mediante `torch.autograd.Function`.
+  - `src/training/train.py`: Il cuore operativo. Definisce il training loop UDA (Unsupervised Domain Adaptation), calcolando simultaneamente la classificazione supervisionata sulle sorgenti e la Loss Avversariale per l'allineamento dei tre domini in un unico step di retropropagazione.
 
 ---
 
 ### Riferimenti
-
 - Y. Ganin, V. Lempitsky, *Unsupervised Domain Adaptation by Backpropagation*, ICML 2015.
 - M.-H. Chen et al., *Temporal Attentive Alignment for Large-Scale Video Domain Adaptation*, ICCV 2019.
 - D. Tran et al., *A Closer Look at Spatiotemporal Convolutions for Action Recognition*, CVPR 2018.

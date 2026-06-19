@@ -11,14 +11,11 @@
 ## 📝 Project Description
 
 We tackle **Multi-Source Domain Adaptation (MSDA)** for action recognition.
-Two labeled source datasets (HMDB-51, UCF-101) are combined to classify actions
-in an unlabeled target (a Kinetics subset). A shared encoder is trained over
-pre-extracted clip features with per-source classifiers and an adversarial
-domain discriminator (Gradient Reversal Layer), and a similarity-based weighted
-ensemble dynamically balances the two sources at inference on the target.
+Two labeled source datasets (HMDB-51, UCF-101) are combined to classify actions in an unlabeled target domain (a Kinetics-400 subset). 
 
-> 📖 **Official Report**: theoretical details, analysis, and contributions are in
-> [docs/REPORT.md](docs/REPORT.md).
+To ensure a rigorous evaluation and avoid data leakage (since Kinetics is the target), we extract features using an **ImageNet-1K pretrained ResNet-50 inflated to 3D (I3D)**, completely freezing the backbone. A shared encoder is trained over these pre-extracted clip features with per-source classifiers and an adversarial domain discriminator (Gradient Reversal Layer). Finally, a similarity-based weighted ensemble dynamically balances the two sources at inference on the target.
+
+> 📖 **Official Report**: theoretical details, analysis, and contributions are available in Italian at [docs/REPORT.md](docs/REPORT.md).
 
 ## 🛠 Technical Reproducibility
 
@@ -31,69 +28,54 @@ conda env create -f environment.yml
 conda activate dl-project
 ```
 
-> ⚠️ **Running on an offline / air-gapped cluster?** Internet-dependent steps
-> (backbone weights, environment, datasets) must be prepared from home and
-> transferred. Follow [docs/OFFLINE_SETUP.md](docs/OFFLINE_SETUP.md) instead of
-> the steps below, then come back here for the training commands.
+> ⚠️ **HPC / Cluster Execution:** Real training and feature extraction are designed to be executed via SLURM and Apptainer on the cluster. Check `run_pipeline.sbatch` for the exact offline deployment commands.
 
 **Datasets.** Download the raw videos into `data/raw/`:
 - HMDB-51: https://serre-lab.clps.brown.edu/resource/hmdb-a-large-human-motion-database/
 - UCF-101: https://www.crcv.ucf.edu/data/UCF101.php
 - Kinetics (subset): https://github.com/cvdfoundation/kinetics-dataset
 
-We use a **closed-set of 12 classes shared across all three datasets** (based on
-the UCF-HMDB DA benchmark). The mapping lives in `src/data/class_mapping.py`.
-After downloading, verify the class names match the folder layout:
+We use a **closed-set of 11 classes shared across all three datasets** (based on the UCF-HMDB benchmark, intentionally excluding 'fencing' to avoid forced mappings). The mapping lives in `src/data/class_mapping.py`.
+
+**Feature extraction (run once).** DA runs on cached features from the ImageNet-pretrained I3D backbone:
 
 ```bash
-python -m src.data.verify_classes --dataset ucf101 --video-root data/raw/UCF-101
-python -m src.data.verify_classes --dataset hmdb51 --video-root data/raw/hmdb51
+python -m src.data.extract_features --dataset hmdb51   --video-root data/raw/hmdb51   --backbone inflated_resnet50 --out-root features_imagenet
+python -m src.data.extract_features --dataset ucf101   --video-root data/raw/UCF-101  --backbone inflated_resnet50 --out-root features_imagenet
+python -m src.data.extract_features --dataset kinetics --video-root data/raw/kinetics --backbone inflated_resnet50 --out-root features_imagenet
 ```
 
-**Feature extraction (run once).** DA runs on cached features from a frozen
-Kinetics-pretrained 3D backbone, not on raw video:
-
-```bash
-python -m src.data.extract_features --dataset hmdb51   --video-root data/raw/hmdb51   --out-root features
-python -m src.data.extract_features --dataset ucf101   --video-root data/raw/UCF-101  --out-root features
-python -m src.data.extract_features --dataset kinetics --video-root data/raw/kinetics --out-root features
-```
-
-This produces `features/<dataset>/<class>/<id>.npy` and an `index.csv` per dataset.
+This produces `features_imagenet/<dataset>/<class>/<id>.npy` and an `index.csv` per dataset.
 
 ### 2. Network Training
 
-**Baseline (objective 1 — no adaptation, zero-shot on target):**
+**Multi-source DA model (Adversarial Training + GRL):**
 
 ```bash
-python -m src.training.train --config experiments/configs/baseline.yaml
+python -m src.training.train --config experiments/configs/model_v1_in.yaml
 ```
 
-**Multi-source DA model (objectives 2–3):**
+### 3. Interactive Notebooks (Analysis & Plots)
 
-```bash
-python -m src.training.train --config experiments/configs/model_v1.yaml
-```
+The project includes two interactive Jupyter Notebooks to explore the mathematical dynamics and visualize the results:
 
-### 3. Evaluation
+- `notebooks/1_dati_backbone_feature.ipynb`: Explores the datasets, class distribution, and the I3D feature extraction mechanics.
+- `notebooks/2_training_da_classifiers.ipynb`: Demonstrates the GRL math via an interactive simulation (Smoke Test) and plots the **real PCA alignments** and **Zero-Shot accuracies** by loading the trained weights from `experiments/checkpoints/msda_model_v1_in.pt`.
 
-```bash
-python -m src.evaluation.evaluate --config experiments/configs/model_v1.yaml
-```
-
-Prints target accuracy and the **Source-1 vs Source-2 influence ratio**
-(objective 4).
-
-## Repository structure
+## 📁 Repository structure
 
 ```
 src/
-  data/      class_mapping, feature extraction, datasets, class verification
-  models/    GRL, shared encoder + per-source heads + discriminator + ensemble
-  training/  train.py (baseline + msda modes)
-  evaluation/evaluate.py
-experiments/configs/   baseline.yaml, model_v1.yaml
-docs/REPORT.md
+  data/      class_mapping, feature extraction, datasets
+  models/    GRL, Inflated ResNet, shared encoder, discriminator, ensemble
+  training/  train.py (adversarial msda loop)
+notebooks/
+  1_dati_backbone_feature.ipynb
+  2_training_da_classifiers.ipynb
+experiments/
+  configs/     model_v1_in.yaml
+  checkpoints/ (saved models)
+docs/
+  REPORT.md
+run_pipeline.sbatch
 ```
-
-*For the declaration of individual tasks and the use of AI, see `docs/REPORT.md`.*
