@@ -188,7 +188,7 @@ Limitazioni attuali:
 **7.1 Breakdown dei Contributi**
 - **Jhoannis Caccamo:** Ha implementato il codice base, strutturando la pipeline di preprocessing per l'estrazione e l'armonizzazione delle clip dai dataset.
 - **Alessia Maccarrone:** Ha gestito la fase di addestramento e valutazione, individuando il problema del *data leak* ed elaborando l'analisi interpretativa delle metriche.
-- **Matteo Vullo:** Ha curato l'architettura avversariale, supportato la logica di bilanciamento delle classi e implementato le visualizzazioni grafiche e l'ottimizzazione del codice nei notebook.
+- **Matteo Vullo:** Ha curato la logica di bilanciamento delle classi e implementato le visualizzazioni grafiche.
 
 **7.2 Utilizzo di Strumenti di Assistenza**
 Durante lo sviluppo sono stati utilizzati strumenti basati su Intelligenza Artificiale per accelerare la scrittura del codice di utilità, assistere nelle fasi di debugging e supportare la formattazione di grafici e reportistica. Le scelte architetturali, l'analisi delle metriche e l'interpretazione dei risultati sono rimaste responsabilità esclusiva del team.
